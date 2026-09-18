@@ -2,9 +2,75 @@
 // Connects to the backend WebSocket, renders each component as a real
 // DOM element positioned from actual Scene state, and supports
 // dragging new components from the dock onto the canvas.
-
 const canvas = document.getElementById("canvas");
+const canvasWrap = document.getElementById("canvas-wrap");
+const canvasViewport = document.getElementById("canvas-viewport");
+
 const palette = document.getElementById("palette");
+
+let simulationZoom = 1;
+
+let simulationPanX = 0;
+let simulationPanY = 0;
+
+let panning = false;
+let panStartX = 0;
+let panStartY = 0;
+let panOriginX = 0;
+let panOriginY = 0;
+
+canvasViewport.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.ctrlKey) return;
+
+    e.preventDefault();
+
+    const zoomStep = 0.1;
+
+    if (e.deltaY < 0) {
+      simulationZoom += zoomStep;
+    } else {
+      simulationZoom -= zoomStep;
+    }
+
+    simulationZoom = Math.max(
+      0.5,
+      Math.min(2.5, simulationZoom)
+    );
+
+    canvas.style.transform = `scale(${simulationZoom})`;
+
+    const gridSize = 25 * simulationZoom;
+
+    canvasViewport.style.backgroundSize =
+      `${gridSize}px ${gridSize}px`;
+  },
+  { passive: false }
+);
+
+canvasWrap.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.ctrlKey) return;
+
+    e.preventDefault();
+
+    const zoomStep = 0.1;
+
+    if (e.deltaY < 0) {
+      simulationZoom += zoomStep;
+    } else {
+      simulationZoom -= zoomStep;
+    }
+
+    simulationZoom = Math.max(0.5, Math.min(2.5, simulationZoom));
+
+    canvas.style.transform = `scale(${simulationZoom})`;
+    canvas.style.transformOrigin = "top left";
+  },
+  { passive: false }
+);
 
 let latestState = {};
 // Cache of created DOM elements per tag_name, so we update in place
@@ -470,14 +536,19 @@ function enableComponentDragging(el, tagName) {
       moved = true;
     }
 
-    const newX = Math.round(originX + dx);
-    const newY = Math.round(originY + dy);
+    // Convert mouse movement from screen pixels
+    // back into simulation coordinates.
+    const newX = Math.round(
+      originX + dx / simulationZoom
+    );
 
-    // Immediate visual movement
+    const newY = Math.round(
+      originY + dy / simulationZoom
+    );
+
     el.style.left = `${newX}px`;
     el.style.top = `${newY}px`;
 
-    // Keep Python/server state authoritative
     sendSetProperty(tagName, "x", newX);
     sendSetProperty(tagName, "y", newY);
   });
@@ -492,7 +563,6 @@ function enableComponentDragging(el, tagName) {
       el.releasePointerCapture(e.pointerId);
     } catch (_) {}
 
-    // Prevent the drag from also triggering the component click action.
     if (moved) {
       e.preventDefault();
       el.dataset.justDragged = "true";
@@ -990,25 +1060,33 @@ palette.addEventListener("dragstart", (e) => {
   e.dataTransfer.effectAllowed = "copy";
 });
 
-canvas.addEventListener("dragover", (e) => {
-  e.preventDefault(); // required to allow dropping
-  canvas.classList.add("drag-over");
-});
-
-canvas.addEventListener("dragleave", () => {
-  canvas.classList.remove("drag-over");
-});
-
-canvas.addEventListener("drop", (e) => {
+canvasViewport.addEventListener("dragover", (e) => {
   e.preventDefault();
-  canvas.classList.remove("drag-over");
+  e.dataTransfer.dropEffect = "copy";
+  canvasViewport.classList.add("drag-over");
+});
+
+canvasViewport.addEventListener("dragleave", (e) => {
+  // Only remove the highlight when leaving the viewport itself.
+  if (!canvasViewport.contains(e.relatedTarget)) {
+    canvasViewport.classList.remove("drag-over");
+  }
+});
+
+canvasViewport.addEventListener("drop", (e) => {
+  e.preventDefault();
+  canvasViewport.classList.remove("drag-over");
 
   const componentType = e.dataTransfer.getData("text/plain");
   if (!componentType) return;
 
-  const rect = canvas.getBoundingClientRect();
-  const x = Math.round(e.clientX - rect.left);
-  const y = Math.round(e.clientY - rect.top);
+  const rect = canvasViewport.getBoundingClientRect();
+
+  const x =
+    (e.clientX - rect.left - simulationPanX) / simulationZoom;
+
+  const y =
+    (e.clientY - rect.top - simulationPanY) / simulationZoom;
 
   sendAddComponent(componentType, x, y);
 });
@@ -1454,3 +1532,68 @@ function showValidationResult(problems) {
   );
   alert(`${problems.length} mapping error(s) found:\n\n${lines.join("\n\n")}`);
 }
+
+function applySimulationTransform() {
+  canvas.style.transform =
+    `translate(${simulationPanX}px, ${simulationPanY}px) scale(${simulationZoom})`;
+
+  const gridSize = 25 * simulationZoom;
+
+  canvasViewport.style.backgroundSize =
+    `${gridSize}px ${gridSize}px`;
+
+  // Keep the grid synchronized with the simulation view while panning.
+  canvasViewport.style.backgroundPosition =
+    `${simulationPanX}px ${simulationPanY}px`;
+}
+
+// ---------- Simulation: pan view by dragging empty area ----------
+
+canvasViewport.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+
+  // Clicking a component is handled by the component's own drag logic.
+  if (e.target.closest(".component")) return;
+
+  panning = true;
+
+  panStartX = e.clientX;
+  panStartY = e.clientY;
+
+  panOriginX = simulationPanX;
+  panOriginY = simulationPanY;
+
+  canvasViewport.setPointerCapture(e.pointerId);
+  canvasViewport.style.cursor = "grabbing";
+});
+
+canvasViewport.addEventListener("pointermove", (e) => {
+  if (!panning) return;
+
+  const dx = e.clientX - panStartX;
+  const dy = e.clientY - panStartY;
+
+  simulationPanX = panOriginX + dx;
+  simulationPanY = panOriginY + dy;
+
+  applySimulationTransform();
+});
+
+function stopSimulationPanning(e) {
+  if (!panning) return;
+
+  panning = false;
+
+  try {
+    canvasViewport.releasePointerCapture(e.pointerId);
+  } catch (_) {}
+
+  canvasViewport.style.cursor = "grab";
+}
+
+canvasViewport.addEventListener("pointerup", stopSimulationPanning);
+canvasViewport.addEventListener("pointercancel", stopSimulationPanning);
+
+canvasViewport.style.cursor = "grab";
+
+applySimulationTransform();
