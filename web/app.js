@@ -82,6 +82,20 @@ const PROPERTY_FIELDS = {
       options: [["Red", "Red"], ["Green", "Green"], ["Blue", "Blue"], ["Yellow", "Yellow"], ["Gray", "Gray"]] },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
+  emergency_push_button: [
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Width", type: "number", min: 14, max: 500, suffix: " px" },
+    { key: "height", send: "height", label: "Height", type: "number", min: 14, max: 500, suffix: " px" },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+  ],
+  toggle_switch: [
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Width", type: "number", min: 20, max: 500, suffix: " px" },
+    { key: "height", send: "height", label: "Height", type: "number", min: 10, max: 500, suffix: " px" },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+  ],
 };
 
 // Read-only telemetry shown above the editable fields.
@@ -91,6 +105,8 @@ const STATUS_FIELDS = {
   motor: [["running", "Running"]],
   sensor: [["detected", "Detected"]],
   push_button: [["pressed", "Pressed"]],
+  emergency_push_button: [["pressed", "Pressed"]],
+  toggle_switch: [["on", "On"]],
 };
 
 // Base color per named option, used to fill the button face -- keep in
@@ -289,6 +305,8 @@ function render(state) {
     else if (obj.type === "motor") renderMotor(tagName, obj);
     else if (obj.type === "sensor") renderSensor(tagName, obj);
     else if (obj.type === "push_button") renderPushButton(tagName, obj);
+    else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj);
+    else if (obj.type === "toggle_switch") renderToggleSwitch(tagName, obj);
   }
 
   renderComponentsList(state);
@@ -739,6 +757,83 @@ function renderPushButton(tagName, b) {
   el.classList.toggle("pressed", !!b.pressed);
 
   el.querySelector(".tag").textContent = `${tagName}  pressed=${b.pressed}`;
+}
+
+// Latching, unlike push_button above: one click presses it (and latches
+// the freeze -- see Scene.is_emergency_stopped()), the next click
+// releases it. Ported from EmergencyPushButtonItem.mousePressEvent,
+// whose mouseReleaseEvent is commented out there too.
+function renderEmergencyPushButton(tagName, b) {
+  const el = getOrCreate(
+    tagName,
+    "epb-ui",
+    (container) => {
+      const face = document.createElement("div");
+      face.className = "epb-face";
+      container.appendChild(face);
+
+      const tag = document.createElement("div");
+      tag.className = "tag";
+      container.appendChild(tag);
+
+      container.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        const isPressed = !!latestState[tagName]?.pressed;
+        sendSetProperty(tagName, "pressed", isPressed ? 0 : 1);
+      });
+    },
+    () => {
+      selectComponent(tagName);
+    }
+  );
+
+  el.style.left = `${b.x}px`;
+  el.style.top = `${b.y}px`;
+  el.style.width = `${b.width}px`;
+  el.style.height = `${b.height}px`;
+  el.style.zIndex = b.layer || 0;
+
+  el.classList.toggle("pressed", !!b.pressed);
+
+  el.querySelector(".tag").textContent = `${tagName}  pressed=${b.pressed}`;
+}
+
+// Click (press+release without a drag) flips the state -- getOrCreate's
+// own "click" listener already ignores clicks that followed a drag
+// (el.dataset.justDragged), so ToggleSwitchItem's move-vs-click check
+// doesn't need to be reimplemented here.
+function renderToggleSwitch(tagName, t) {
+  const el = getOrCreate(
+    tagName,
+    "toggle-ui",
+    (container) => {
+      const track = document.createElement("div");
+      track.className = "toggle-track";
+      const knob = document.createElement("div");
+      knob.className = "toggle-knob";
+      track.appendChild(knob);
+      container.appendChild(track);
+
+      const tag = document.createElement("div");
+      tag.className = "tag";
+      container.appendChild(tag);
+    },
+    () => {
+      const isOn = !!latestState[tagName]?.on;
+      sendSetProperty(tagName, "on", isOn ? 0 : 1);
+      selectComponent(tagName);
+    }
+  );
+
+  el.style.left = `${t.x}px`;
+  el.style.top = `${t.y}px`;
+  el.style.width = `${t.width}px`;
+  el.style.height = `${t.height}px`;
+  el.style.zIndex = t.layer || 0;
+
+  el.classList.toggle("on", !!t.on);
+
+  el.querySelector(".tag").textContent = `${tagName}  on=${t.on}`;
 }
 
 // ---------- Dock: drag components onto the canvas ----------

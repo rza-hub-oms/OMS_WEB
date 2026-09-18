@@ -912,6 +912,67 @@ button:hover { background: #25445c; border-color: #3488c7; }
 
 .pushbutton-ui.pressed .pushbutton-face::after { opacity: .25; }
 
+.epb-ui {
+  box-sizing: border-box;
+  min-width: 14px;
+  min-height: 14px;
+}
+
+.epb-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 25%;
+  background: linear-gradient(135deg, #ffeb28, #aa8700);
+  border: 1px solid #3c3700;
+}
+
+.epb-face::after {
+  content: "";
+  position: absolute;
+  inset: 10%;
+  border-radius: 20%;
+  background: radial-gradient(circle at 35% 30%, #f54141, #911010 70%);
+  border: 1px solid #460000;
+}
+
+.epb-ui.pressed .epb-face::after {
+  background: radial-gradient(circle at 35% 30%, #7d1414, #460808 70%);
+  transform: scale(0.94);
+}
+
+.toggle-ui {
+  box-sizing: border-box;
+  min-width: 20px;
+  min-height: 10px;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 7%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #bebebe, #787878);
+  border: 1px solid #1e1e1e;
+  transition: background 120ms ease, justify-content 120ms ease;
+}
+
+.toggle-ui.on .toggle-track {
+  justify-content: flex-end;
+  background: linear-gradient(180deg, #5ac864, #288c32);
+}
+
+.toggle-knob {
+  height: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fafafa, #b4b4b4);
+  border: 1px solid #3c3c3c;
+}
+
 .delete {
   width: 100%;
   margin-top: 8px;

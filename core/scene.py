@@ -14,6 +14,8 @@ from core.components.cylinder import CylinderBehavior
 from core.components.motor import MotorBehavior
 from core.components.sensor import SensorBehavior
 from core.components.push_button import PushButtonBehavior
+from core.components.emergency_push_button import EmergencyPushButtonBehavior
+from core.components.toggle_switch import ToggleSwitchBehavior
 
 # Maps a serialized "type" string to its behavior class. Extend this as
 # more components are ported (toggle_switch, tower_light, etc.).
@@ -23,6 +25,8 @@ COMPONENT_REGISTRY = {
     "motor": MotorBehavior,
     "sensor": SensorBehavior,
     "push_button": PushButtonBehavior,
+    "emergency_push_button": EmergencyPushButtonBehavior,
+    "toggle_switch": ToggleSwitchBehavior,
 }
 
 TICK_MS = 50
@@ -69,9 +73,21 @@ class Scene:
         self.add(obj)
         return obj
 
+    def is_emergency_stopped(self) -> bool:
+        """True while any EmergencyPushButtonBehavior is latched
+        pressed -- the web equivalent of sim_view.emergency_stop()
+        freezing the desktop app's animation timer."""
+        return any(
+            isinstance(obj, EmergencyPushButtonBehavior) and obj.pressed
+            for obj in self.objects.values()
+        )
+
     def tick(self, dt_ms: float = TICK_MS) -> None:
         """Advance every component by one simulation step, then update
         sensor detection against the now-current box positions."""
+        if self.is_emergency_stopped():
+            return
+
         for obj in self.objects.values():
             obj.advance_animation(dt_ms)
 
