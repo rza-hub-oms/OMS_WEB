@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OMS Web Prototype</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>OMS Web Prototype</h1>
+  <p id="status">Connecting...</p>
+
+  <section id="plc-connect-bar">
+    <div class="panel-title">
+      PLC CONNECTION
+      <span id="plc-status-dot" class="status-dot"></span>
+      <span id="plc-status-text">Not connected</span>
+    </div>
+
+    <div id="plc-connect-form">
+      <label>Backend
+        <select id="plc-backend-select">
+          <option value="asyncua">asyncua (OPC UA)</option>
+          <option value="opcua">opcua (OPC UA)</option>
+          <option value="s7">s7 (Siemens S7comm)</option>
+        </select>
+      </label>
+
+      <div id="plc-opcua-fields" class="plc-backend-fields">
+        <label>URL <input id="plc-url" type="text" placeholder="opc.tcp://host:4840"></label>
+        <label>Username <input id="plc-username" type="text"></label>
+        <label>Password <input id="plc-password" type="password"></label>
+        <label>Security
+          <select id="plc-security">
+            <option value="None">None</option>
+            <option value="Basic256Sha256,Sign">Sign</option>
+            <option value="Basic256Sha256,SignAndEncrypt">Sign &amp; Encrypt</option>
+          </select>
+        </label>
+        <label>Certificate path <input id="plc-cert" type="text"></label>
+        <label>Private key path <input id="plc-key" type="text"></label>
+      </div>
+
+      <div id="plc-s7-fields" class="plc-backend-fields" style="display:none;">
+        <label>IP <input id="plc-ip" type="text" placeholder="192.168.0.1"></label>
+        <label>Rack <input id="plc-rack" type="number" value="0"></label>
+        <label>Slot <input id="plc-slot" type="number" value="1"></label>
+      </div>
+
+      <div class="plc-connect-buttons">
+        <button id="plc-connect-btn" class="apply">Connect</button>
+        <button id="plc-disconnect-btn">Disconnect</button>
+        <button id="plc-pause-btn" disabled>Pause</button>
+      </div>
+
+      <p id="plc-last-error" class="plc-error"></p>
+      <div id="plc-event-log" class="plc-event-log"></div>
+    </div>
+  </section>
+
+  <div id="app">
+    <aside id="dock">
+      <div class="panel-title">COMPONENTS</div>
+      <div id="palette" class="palette">
+        <button draggable="true" data-type="conveyor">Conveyor</button>
+        <button draggable="true" data-type="cylinder">Cylinder</button>
+        <button draggable="true" data-type="motor">Motor</button>
+        <button draggable="true" data-type="sensor">Sensor</button>
+        <button class="disabled" data-type="push_button" title="Not yet ported">Push button</button>
+        <button class="disabled" data-type="emergency_push_button" title="Not yet ported">Emergency PB</button>
+        <button class="disabled" data-type="toggle_switch" title="Not yet ported">Toggle switch</button>
+        <button class="disabled" data-type="tower_light" title="Not yet ported">Tower light</button>
+        <button class="disabled" data-type="label" title="Not yet ported">Label</button>
+        <button id="clear-view-btn" title="Remove all components">Clear View</button>
+      </div>
+      <p class="hint">Drag a component onto the canvas to add it. Greyed-out types aren't ported to the web yet.</p>
+    </aside>
+
+    <div id="canvas-wrap">
+      <div id="canvas"></div>
+      <p class="hint">Click a conveyor to start/stop it, or a cylinder to extend/retract it.</p>
+    </div>
+
+    <aside id="properties">
+      <div class="panel-title">INSPECTOR</div>
+
+      <div class="tabs">
+        <button type="button" class="tab active" data-tab="properties">Properties</button>
+        <button type="button" class="tab" data-tab="plc">PLC Mapping</button>
+        <button type="button" class="tab" data-tab="components">Components</button>
+      </div>
+
+      <div id="properties-tab" class="tab-panel active" data-panel="properties">
+        <div id="property-body">
+          <p class="empty">Select a component to view its properties.</p>
+        </div>
+      </div>
+
+      <div id="plc-tab" class="tab-panel" data-panel="plc">
+        <p id="node-hint" class="hint"></p>
+
+        <input id="mapping-filter" type="text" placeholder="Filter by object, I/O point, or node ID...">
+        <label class="group-toggle"><input id="mapping-group" type="checkbox"> Group by Object</label>
+
+        <div id="mapping-table-wrap">
+          <table id="mapping-table">
+            <thead>
+              <tr>
+                <th>Object</th>
+                <th>I/O Point</th>
+                <th>Direction</th>
+                <th>PLC Node ID</th>
+                <th>Live Value</th>
+                <th>Force Value</th>
+              </tr>
+            </thead>
+            <tbody id="mapping-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="mapping-actions">
+          <button id="mapping-rescan-btn">Rescan Scene</button>
+          <button id="mapping-apply-btn" class="apply">Apply Mappings</button>
+          <button id="mapping-validate-btn">Validate Mappings</button>
+        </div>
+      </div>
+      <div id="components-tab" class="tab-panel" data-panel="components">
+          <ul id="components-list"></ul>
+      </div>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

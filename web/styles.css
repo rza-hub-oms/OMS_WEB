@@ -1,0 +1,903 @@
+:root {
+  --ink: #dce5ef;
+  --muted: #8493a3;
+  --panel: #111a24;
+  --panel2: #17222d;
+  --edge: #283747;
+  --blue: #1688e8;
+  --green: #3cce80;
+  --red: #f35361;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #0b121a;
+  color: var(--ink);
+  font: 13px Inter, "Segoe UI", Arial, sans-serif;
+  padding: 20px;
+}
+
+h1 { font-size: 16px; margin: 0 0 10px; }
+
+#status { color: var(--muted); margin-bottom: 12px; }
+
+#plc-connect-bar {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+#plc-connect-bar .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#app {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  width: 100%;
+  min-height: calc(100vh - 120px);
+}
+
+#dock {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.panel-title {
+  color: #8092a3;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #20303e;
+}
+
+.palette { display: flex; flex-direction: column; padding: 6px 0; }
+
+.palette button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 8px 14px;
+  cursor: grab;
+}
+
+.palette button:hover:not(.disabled) { background: #173347; color: #fff; }
+
+.palette button.disabled {
+  color: #566878;
+  cursor: not-allowed;
+}
+
+.hint {
+  margin: 0;
+  padding: 10px 14px 14px;
+  color: #758698;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: calc(100vh - 120px);
+  overflow: auto;
+}
+
+#canvas.drag-over {
+  outline: 2px dashed var(--blue);
+  outline-offset: -2px;
+}
+
+#properties {
+  width: 380px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  overflow: hidden;
+  max-height: 700px;
+  display: flex;
+  flex-direction: column;
+}
+
+#properties .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #263746;
+  flex-shrink: 0;
+}
+
+.tabs .tab {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 9px 6px;
+  color: #7c90a3;
+  font-size: 11px;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs .tab.active {
+  color: #e4edf5;
+  border-bottom: 2px solid var(--blue);
+}
+
+.tab-panel { display: none; overflow-y: auto; flex: 1; min-height: 0; }
+.tab-panel.active { display: block; }
+
+.panel-title.inner {
+  margin: 4px 0 0;
+  border-top: 1px solid #20303e;
+  border-bottom: 1px solid #20303e;
+}
+
+.empty {
+  padding: 16px 14px;
+  color: #718497;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.selected-name {
+  font-size: 13px;
+  font-weight: bold;
+  padding: 12px 14px;
+  border-bottom: 1px solid #263746;
+}
+
+#property-form label {
+  display: block;
+  color: #8ca0b2;
+  font-size: 11px;
+  margin: 12px 14px 0;
+}
+
+#property-form input,
+#property-form select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #3a4d5d;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 14px;
+}
+
+.two label { margin: 12px 0 0; }
+
+.apply {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 16px 14px 14px;
+  background: #147c47;
+  border-color: #25985e;
+}
+
+.apply:hover { background: #168b51; }
+
+#status-block { padding: 2px 0 4px; border-bottom: 1px solid #263746; }
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 14px;
+  font-size: 11px;
+  color: #a9bccb;
+}
+
+.status-row span:last-child { color: var(--ink); font-weight: 600; }
+
+#name-input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-weight: bold;
+  font-size: 13px;
+  padding: 0;
+}
+
+#name-input:focus { outline: none; border-bottom: 1px solid var(--blue); }
+
+.component.selected {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+
+/* ---------- Simulation canvas ---------- */
+
+#canvas {
+  position: relative;
+  width: 100%;
+  min-width: 900px;
+  height: calc(100vh - 120px);
+  min-height: 600px;
+  background-color: var(--panel2);
+  background-image:
+    linear-gradient(#263544 1px, transparent 1px),
+    linear-gradient(90deg, #263544 1px, transparent 1px);
+  background-size: 25px 25px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+}
+
+.tag {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #101923e8;
+  border: 1px solid #41576a;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 10px;
+  color: #d6e2ee;
+  pointer-events: none;
+}
+
+.component { 
+  position: absolute;
+  cursor: grab;
+  user-select: none;
+}
+
+.component.dragging {
+  cursor: grabbing;
+  z-index: 1000;
+}
+
+/* ---------- Conveyor (from oms-web reference) ---------- */
+
+.conveyor-ui {
+  background: linear-gradient(#728291, #3e4d5a);
+  border: 2px solid #263440;
+  border-radius: 3px;
+}
+
+.conveyor-ui:before {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  background: repeating-linear-gradient(90deg, #b8c1c8 0 22px, transparent 22px 43px);
+  opacity: .6;
+}
+
+.conveyor-ui.running:before {
+  animation: belt 0.7s linear infinite;
+}
+
+@keyframes belt {
+  to { background-position: 43px 0; }
+}
+
+/* The box is real (positioned from actual box_positions data), unlike
+   the reference project which only animates the belt background. */
+.box-ui {
+  position: absolute;
+  background: linear-gradient(#c8905a, #8c5a32);
+  border: 1px solid #5a3a1e;
+  border-radius: 2px;
+}
+
+/* ---------- Cylinder (adapted: rod width/position driven by real
+   `progress`, not a binary extended/retracted CSS class) ---------- */
+
+.cylinder-ui { /* full item footprint (body + rod travel); rotates as one unit */ }
+
+.body-ui {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: #94a8b8;
+  border: 2px solid #283845;
+  border-radius: 3px;
+}
+
+.rod-ui {
+  position: absolute;
+  background: #e4edf2;
+  border: 2px solid #637684;
+  top: 30%;
+  height: 40%;
+}
+
+button {
+  background: #1c2b39;
+  border: 1px solid #34485a;
+  color: var(--ink);
+  border-radius: 4px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+  margin-right: 8px;
+}
+
+button:hover { background: #25445c; border-color: #3488c7; }
+
+#controls { margin-top: 12px; }
+
+/* ---------- PLC connection + mapping panel ---------- */
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #566878;
+  display: inline-block;
+}
+
+.status-dot.connected { background: var(--green); }
+.status-dot.connected.unhealthy { background: #e0a83c; }
+.status-dot.connected.paused { background: #6a7a8a; }
+
+#plc-status-text {
+  letter-spacing: normal;
+  font-weight: normal;
+  color: #a9bccb;
+  text-transform: none;
+  font-size: 10px;
+}
+
+#plc-connect-form {
+  padding: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  border-bottom: 1px solid #20303e;
+}
+
+#plc-connect-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #8ca0b2;
+  font-size: 11px;
+}
+
+#plc-connect-form input,
+#plc-connect-form select {
+  padding: 6px 8px;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #3a4d5d;
+  border-radius: 3px;
+  font: inherit;
+  min-width: 110px;
+}
+
+.plc-backend-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+}
+
+.plc-connect-buttons { display: flex; gap: 8px; }
+
+.plc-connect-buttons .apply { margin: 0; width: auto; padding: 7px 14px; }
+
+.plc-error {
+  color: var(--red);
+  font-size: 11px;
+  width: 100%;
+  margin: 0;
+}
+
+.plc-event-log {
+  width: 100%;
+  max-height: 70px;
+  overflow-y: auto;
+  font-size: 10px;
+  color: #7f93a4;
+  line-height: 1.5;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+#node-hint {
+  margin: 10px 14px 0;
+  padding: 0;
+}
+
+#mapping-filter {
+  margin: 8px 14px 0;
+  width: calc(100% - 28px);
+  padding: 6px 8px;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #3a4d5d;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.group-toggle {
+  display: block;
+  margin: 8px 14px 0;
+  color: #8ca0b2;
+  font-size: 11px;
+}
+
+#mapping-table-wrap {
+  margin: 10px 14px 14px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #263746;
+  border-radius: 4px;
+}
+
+/* The table has 6 columns of real content (Object, I/O Point,
+   Direction, Node ID, Live Value, Force Value) -- too much for a
+   380px dock to show without scrolling. Rather than cramming cells
+   illegibly, give the table a sane minimum width and let the wrapper
+   above scroll horizontally. */
+#mapping-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 12px; }
+
+#mapping-table th {
+  position: sticky;
+  top: 0;
+  background: #17232f;
+  color: #8ca0b2;
+  text-align: left;
+  padding: 8px;
+  font-size: 10px;
+  letter-spacing: .5px;
+  border-bottom: 1px solid #2c3f4f;
+}
+
+#mapping-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #202f3c;
+  white-space: nowrap;
+}
+
+#mapping-table td.center { text-align: center; }
+
+#mapping-table tr.unmapped-row { background: #3a3320; }
+
+#mapping-table tr.mapping-group-header {
+  background: #1b2732;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.node-input, .force-input {
+  width: 100%;
+  min-width: 120px;
+  padding: 4px 6px;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #3a4d5d;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.force-cell { display: flex; gap: 4px; }
+.force-cell .force-input { width: 70px; min-width: 0; }
+.force-cell button { padding: 4px 8px; margin: 0; }
+
+.mapping-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+.mapping-actions .apply { margin: 0; width: auto; padding: 7px 14px; }
+
+.motor-ui {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 60px;
+  min-height: 40px;
+  transform-origin: center center;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Main motor housing */
+.motor-body {
+  position: absolute;
+  left: 10%;
+  top: 16%;
+  width: 62%;
+  height: 68%;
+  box-sizing: border-box;
+
+  background: linear-gradient(
+    to bottom,
+    #84888c 0%,
+    #606468 42%,
+    #3a3d40 100%
+  );
+
+  border: 1px solid #1c1e20;
+  clip-path: polygon(
+    0 16%,
+    8% 0,
+    92% 0,
+    100% 16%,
+    100% 84%,
+    92% 100%,
+    8% 100%,
+    0 84%
+  );
+}
+
+/* Cooling ribs */
+.motor-ribs {
+  position: absolute;
+  inset: 8% 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    #2f3133 0,
+    #2f3133 5%,
+    transparent 5%,
+    transparent 10%
+  );
+  opacity: 0.9;
+}
+
+/* Terminal box */
+.motor-terminal {
+  position: absolute;
+  left: 40%;
+  top: 2%;
+  width: 15%;
+  height: 23%;
+  box-sizing: border-box;
+
+  background: linear-gradient(
+    to bottom,
+    #6a6e71,
+    #494d50 50%,
+    #2b2e30
+  );
+
+  border: 1px solid #1a1c1e;
+  z-index: 5;
+}
+
+/* Terminal box top cover */
+.motor-terminal::before {
+  content: "";
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  top: 8%;
+  height: 13%;
+  background: #7d8184;
+}
+
+/* Rear/end shield */
+.motor-shield {
+  position: absolute;
+  left: 6%;
+  top: 20%;
+  width: 10%;
+  height: 58%;
+  border-radius: 45%;
+
+  background: linear-gradient(
+    to bottom,
+    #787c80,
+    #525659 50%,
+    #303336
+  );
+
+  border: 1px solid #191b1d;
+}
+
+/* Fan cover */
+.motor-fan {
+  position: absolute;
+  left: 68%;
+  top: 20%;
+  width: 15%;
+  height: 58%;
+  border-radius: 42%;
+
+  background:
+    radial-gradient(
+      circle,
+      #292d30 0 20%,
+      #4a4e51 21% 55%,
+      #292d30 56% 100%
+    );
+
+  border: 1px solid #191b1d;
+  overflow: hidden;
+  z-index: 4;
+}
+
+/* Fan center */
+.motor-fan::after {
+  content: "";
+  position: absolute;
+  left: 38%;
+  top: 38%;
+  width: 24%;
+  height: 24%;
+  border-radius: 50%;
+  background: #707477;
+  border: 1px solid #202224;
+}
+
+/* Shaft */
+.motor-shaft {
+  position: absolute;
+  left: 80%;
+  top: 43%;
+  width: 14%;
+  height: 14%;
+
+  background: linear-gradient(
+    to bottom,
+    #afb2b4,
+    #4e5154 30%,
+    #1f2123 100%
+  );
+
+  border: 1px solid #1f2123;
+  z-index: 3;
+}
+
+/* Coupling */
+.motor-coupling {
+  position: absolute;
+  left: 91%;
+  top: 38%;
+  width: 7%;
+  height: 24%;
+
+  background: linear-gradient(
+    to bottom,
+    #878a8c,
+    #4c4f51 50%,
+    #26282a
+  );
+
+  border: 1px solid #191b1d;
+  z-index: 5;
+}
+
+/* Mounting feet */
+.motor-foot {
+  position: absolute;
+  bottom: 5%;
+  width: 23%;
+  height: 10%;
+
+  background: linear-gradient(
+    to bottom,
+    #676b6e,
+    #26282a
+  );
+
+  border: 1px solid #181a1c;
+}
+
+.motor-foot-left {
+  left: 14%;
+}
+
+.motor-foot-right {
+  left: 48%;
+}
+
+/* Running indicator */
+.motor-status {
+  position: absolute;
+  left: 7%;
+  top: 13%;
+  width: 7%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+
+  background: #4e5154;
+  border: 1px solid #0f1213;
+  z-index: 6;
+}
+
+.motor-ui.running .motor-status {
+  background: radial-gradient(
+    circle at 30% 30%,
+    #dffff0,
+    #19ff19 35%,
+    #007d00 100%
+  );
+
+  box-shadow:
+    0 0 4px #19ff19,
+    0 0 8px rgba(25, 255, 25, 0.65);
+}
+
+/* Direction indicator */
+.motor-direction {
+  position: absolute;
+  inset: 15%;
+  border: 2px solid #ddd;
+  border-left-color: transparent;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.motor-direction::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: -2px;
+
+  width: 0;
+  height: 0;
+
+  border-left: 5px solid #ddd;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.motor-ui.reverse .motor-direction {
+  transform: scaleX(-1);
+}
+
+/* FWD / REV */
+.motor-fan-label {
+  position: absolute;
+  inset: 35% 15%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: #ddd;
+  font-size: 8px;
+  font-weight: bold;
+  z-index: 5;
+}
+
+/* Tag */
+.motor-ui .tag {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 5px;
+
+  padding: 3px 7px;
+
+  background: #20262b;
+  color: #f2f5f7;
+  border: 1px solid #4d5962;
+  border-radius: 5px;
+
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.sensor-ui {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 8px;
+  min-height: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sensor-body {
+  position: absolute;
+  inset: 0;
+
+  background: linear-gradient(
+    135deg,
+    #555,
+    #222
+  );
+
+  border: 2px solid #111;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.sensor-lens {
+  position: absolute;
+  left: 20%;
+  top: 20%;
+  width: 60%;
+  height: 60%;
+
+  border-radius: 50%;
+  background: #151515;
+  border: 1px solid #777;
+  box-sizing: border-box;
+}
+
+.sensor-led {
+  position: absolute;
+  right: 8%;
+  top: 8%;
+  width: 20%;
+  height: 20%;
+
+  border-radius: 50%;
+  background: #333;
+}
+
+.sensor-ui.detected .sensor-led {
+  background: #19ff19;
+  box-shadow: 0 0 7px #19ff19;
+}
+
+.sensor-ui .tag {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.delete {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #7a3030;
+  border-radius: 4px;
+  background: #3a1717;
+  color: #ffb0b0;
+  cursor: pointer;
+}
+
+.delete:hover {
+  background: #551f1f;
+}
+
+#components-list li.selected {
+  background: #173347;
+  color: #fff;
+}
+#components-list li { cursor: pointer; padding: 6px 10px; }
+
+.properties-dock {
+    cursor: grab;
+    overflow-y: hidden; /* Hides the native browser scrollbar */
+    user-select: none;   /* Prevents highlighting text while dragging */
+}
+
+.properties-dock.dragging {
+    cursor: grabbing;
+}
