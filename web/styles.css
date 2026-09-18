@@ -266,6 +266,11 @@ h1 { font-size: 16px; margin: 0 0 10px; }
   font-size: 10px;
   color: #d6e2ee;
   pointer-events: none;
+  display: none;
+}
+
+.component.selected .tag {
+  display: block;
 }
 
 .component { 

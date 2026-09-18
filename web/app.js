@@ -152,6 +152,21 @@ function selectComponent(tagName) {
   renderComponentsList(latestState);
 }
 
+function deselectAll() {
+  selectedTag = null;
+  for (const el of Object.values(elements)) {
+    el.classList.remove("selected");
+  }
+  renderPropertyPanel();
+  renderComponentsList(latestState);
+}
+
+// Clicking empty canvas space (not a component) clears the selection,
+// which also hides the now-unselected components' .tag labels.
+canvas.addEventListener("click", (e) => {
+  if (e.target === canvas) deselectAll();
+});
+
 function renderPropertyPanel() {
   const obj = selectedTag ? latestState[selectedTag] : null;
 
