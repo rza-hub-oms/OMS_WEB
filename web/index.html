@@ -7,13 +7,13 @@
 </head>
 <body>
   <h1>OMS Web Prototype</h1>
-  <p id="status">Connecting...</p>
 
-  <section id="plc-connect-bar">
-    <div class="panel-title">
+  <section id="plc-connect-bar" class="collapsed">
+    <div class="panel-title" id="plc-connect-bar-title">
       PLC CONNECTION
       <span id="plc-status-dot" class="status-dot"></span>
       <span id="plc-status-text">Not connected</span>
+      <button type="button" id="plc-collapse-toggle" class="collapse-toggle" aria-label="Expand PLC connection panel">▾</button>
     </div>
 
     <div id="plc-connect-form">
@@ -99,7 +99,20 @@
         <p id="node-hint" class="hint"></p>
 
         <input id="mapping-filter" type="text" placeholder="Filter by object, I/O point, or node ID...">
-        <label class="group-toggle"><input id="mapping-group" type="checkbox"> Group by Object</label>
+        <div class="mapping-group-controls">
+          <label class="group-toggle">
+            <input id="mapping-group" type="checkbox">
+            Group by Object
+          </label>
+
+          <button type="button" id="mapping-expand-all" class="icon-btn" title="Expand All">
+            ⬍
+          </button>
+
+          <button type="button" id="mapping-collapse-all" class="icon-btn" title="Collapse All">
+            ⬆
+          </button>
+        </div>
 
         <div id="mapping-table-wrap">
           <table id="mapping-table">
@@ -119,7 +132,6 @@
 
         <div class="mapping-actions">
           <button id="mapping-rescan-btn">Rescan Scene</button>
-          <button id="mapping-apply-btn" class="apply">Apply Mappings</button>
           <button id="mapping-validate-btn">Validate Mappings</button>
         </div>
       </div>

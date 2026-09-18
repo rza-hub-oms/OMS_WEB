@@ -3,7 +3,6 @@
 // DOM element positioned from actual Scene state, and supports
 // dragging new components from the dock onto the canvas.
 
-const statusEl = document.getElementById("status");
 const canvas = document.getElementById("canvas");
 const palette = document.getElementById("palette");
 
@@ -292,8 +291,6 @@ function renderPropertyPanel() {
 
 const ws = new WebSocket(`ws://${location.host}/ws`);
 
-ws.onopen = () => { statusEl.textContent = "Connected"; };
-ws.onclose = () => { statusEl.textContent = "Disconnected"; };
 
 let latestPlc = {};
 
@@ -1072,6 +1069,14 @@ document.getElementById("plc-pause-btn").addEventListener("click", () => {
   ws.send(JSON.stringify({ action }));
 });
 
+document.getElementById("plc-connect-bar-title").addEventListener("click", (e) => {
+  const bar = document.getElementById("plc-connect-bar");
+  const collapsed = bar.classList.toggle("collapsed");
+  document.getElementById("plc-collapse-toggle").setAttribute(
+    "aria-label", collapsed ? "Expand PLC connection panel" : "Collapse PLC connection panel"
+  );
+});
+
 function renderPlcStatus(plc) {
   const dot = document.getElementById("plc-status-dot");
   const text = document.getElementById("plc-status-text");
@@ -1131,10 +1136,7 @@ function updateNodeHint(plc) {
   } else if (plc.backend) {
     el.textContent = `Not connected yet — format for ${plc.backend}: ${hints[plc.backend] || ""}`;
   } else {
-    el.textContent =
-      "PLC Node column: the expected address format depends on the connection " +
-      "type (OPC UA node ID vs. an S7 DB address, etc). Connect above to see " +
-      "the format for that connection.";
+    el.textContent = "PLC Node column: the expected address format depends on the connection ";
   }
 }
 
@@ -1173,76 +1175,206 @@ function renderMappingTable(plc, state) {
 
 function buildMappingRows(tbody, rows, mappingList, grouping) {
   const nodeByKey = {};
-  for (const m of mappingList) nodeByKey[`${m.object_tag}|${m.io_point}`] = m.plc_node;
+  for (const m of mappingList) {
+    nodeByKey[`${m.object_tag}|${m.io_point}`] = m.plc_node;
+  }
 
   tbody.innerHTML = "";
   mappingCells = {};
 
   let lastTag = null;
+
   for (const row of rows) {
+
+    // ---------- Object group header ----------
     if (grouping && row.tag !== lastTag) {
       const headerRow = document.createElement("tr");
       headerRow.className = "mapping-group-header";
-      headerRow.innerHTML = `<td colspan="6">▼ ${row.tag}</td>`;
+      headerRow.dataset.groupTag = row.tag;
+
+      headerRow.innerHTML = `
+        <td colspan="6">
+          <span class="group-arrow">▼</span>
+          ${row.tag}
+        </td>
+      `;
+
       headerRow.addEventListener("click", () => {
         const collapsed = headerRow.classList.toggle("collapsed");
-        headerRow.querySelector("td").textContent = `${collapsed ? "▶" : "▼"} ${row.tag}`;
+
+        const arrow = headerRow.querySelector(".group-arrow");
+        arrow.textContent = collapsed ? "▶" : "▼";
+
+        // Hide/show all rows belonging to this object
         let sib = headerRow.nextElementSibling;
+
         while (sib && !sib.classList.contains("mapping-group-header")) {
           sib.style.display = collapsed ? "none" : "";
           sib = sib.nextElementSibling;
         }
+
+        // Re-apply the search filter without losing collapse state
+        applyMappingFilter();
       });
+
       tbody.appendChild(headerRow);
       lastTag = row.tag;
     }
 
+    // ---------- Mapping row ----------
     const key = `${row.tag}|${row.point}`;
     const nodeValue = nodeByKey[key] || "";
     const direction = row.isPlcToOms ? "PLC -> OMS" : "OMS -> PLC";
 
     const tr = document.createElement("tr");
+
+    tr.dataset.groupTag = row.tag;
     tr.classList.toggle("unmapped-row", !nodeValue);
+
     tr.innerHTML = `
       <td>${row.tag}</td>
       <td>${row.point}</td>
       <td class="center">${direction}</td>
-      <td><input type="text" class="node-input"></td>
+      <td>
+        <input type="text" class="node-input">
+      </td>
       <td class="center live-value">—</td>
-      <td>${row.isPlcToOms
-        ? '<span class="force-cell"><input type="text" class="force-input" placeholder="value"><button class="force-apply-btn">Apply</button></span>'
-        : ""}</td>
+      <td>
+        ${row.isPlcToOms
+          ? '<span class="force-cell"><input type="text" class="force-input" placeholder="value"></span>'
+          : ""}
+      </td>
     `;
 
     const nodeInput = tr.querySelector(".node-input");
+
     nodeInput.value = nodeValue;
+
     nodeInput.addEventListener("input", () => {
       tr.classList.toggle("unmapped-row", !nodeInput.value.trim());
     });
 
+    nodeInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        applyAllMappings();
+      }
+    });
+
+    // Force value using ENTER
     if (row.isPlcToOms) {
       const forceInput = tr.querySelector(".force-input");
+
       const applyForce = () => {
         const value = forceInput.value.trim();
+
         if (!value) return;
+
         ws.send(JSON.stringify({
-          action: "plc_force", tag_name: row.tag, io_point: row.point, value,
+          action: "plc_force",
+          tag_name: row.tag,
+          io_point: row.point,
+          value,
         }));
       };
-      tr.querySelector(".force-apply-btn").addEventListener("click", applyForce);
-      forceInput.addEventListener("keydown", (e) => { if (e.key === "Enter") applyForce(); });
+
+      forceInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          applyForce();
+        }
+      });
     }
 
     tbody.appendChild(tr);
-    mappingCells[key] = { nodeInput, liveCell: tr.querySelector(".live-value") };
+
+    mappingCells[key] = {
+      nodeInput,
+      liveCell: tr.querySelector(".live-value"),
+    };
   }
 }
 
+
 function applyMappingFilter() {
-  const text = document.getElementById("mapping-filter").value.toLowerCase().trim();
-  for (const tr of document.getElementById("mapping-tbody").children) {
-    if (tr.classList.contains("mapping-group-header")) continue;
-    tr.style.display = !text || tr.textContent.toLowerCase().includes(text) ? "" : "none";
+  const text = document
+    .getElementById("mapping-filter")
+    .value
+    .toLowerCase()
+    .trim();
+
+  const tbody = document.getElementById("mapping-tbody");
+
+  let currentGroup = null;
+  let groupHeader = null;
+  let groupHasMatch = false;
+
+  for (const tr of tbody.children) {
+
+    // ---------- Group header ----------
+    if (tr.classList.contains("mapping-group-header")) {
+
+      // Finish previous group
+      if (groupHeader) {
+        const collapsed = groupHeader.classList.contains("collapsed");
+
+        groupHeader.style.display =
+          !text || groupHasMatch ? "" : "none";
+
+        let row = groupHeader.nextElementSibling;
+
+        while (row && !row.classList.contains("mapping-group-header")) {
+          const matches =
+            !text ||
+            row.textContent.toLowerCase().includes(text);
+
+          row.style.display =
+            !matches || collapsed ? "none" : "";
+
+          row = row.nextElementSibling;
+        }
+      }
+
+      // Start new group
+      groupHeader = tr;
+      currentGroup = tr.dataset.groupTag;
+      groupHasMatch = false;
+
+      continue;
+    }
+
+    // ---------- Normal row ----------
+    const matches =
+      !text ||
+      tr.textContent.toLowerCase().includes(text);
+
+    if (matches) {
+      groupHasMatch = true;
+    }
+
+    // If grouping is OFF, just filter normally
+    if (!document.getElementById("mapping-group").checked) {
+      tr.style.display = matches ? "" : "none";
+    }
+  }
+
+  // Finish final group
+  if (groupHeader) {
+    const collapsed = groupHeader.classList.contains("collapsed");
+
+    groupHeader.style.display =
+      !text || groupHasMatch ? "" : "none";
+
+    let row = groupHeader.nextElementSibling;
+
+    while (row && !row.classList.contains("mapping-group-header")) {
+      const matches =
+        !text ||
+        row.textContent.toLowerCase().includes(text);
+
+      row.style.display =
+        !matches || collapsed ? "none" : "";
+
+      row = row.nextElementSibling;
+    }
   }
 }
 
@@ -1253,12 +1385,48 @@ document.getElementById("mapping-group").addEventListener("change", () => {
   renderMappingTable(latestPlc, latestState);
 });
 
+document.getElementById("mapping-expand-all").addEventListener("click", () => {
+  document.querySelectorAll("#mapping-tbody .mapping-group-header").forEach((headerRow) => {
+    headerRow.classList.remove("collapsed");
+
+    const td = headerRow.querySelector("td");
+    const tag = headerRow.dataset.groupTag;
+    td.textContent = `▼ ${tag}`;
+
+    let sib = headerRow.nextElementSibling;
+    while (sib && !sib.classList.contains("mapping-group-header")) {
+      sib.style.display = "";
+      sib = sib.nextElementSibling;
+    }
+  });
+
+  applyMappingFilter();
+});
+
+document.getElementById("mapping-collapse-all").addEventListener("click", () => {
+  document.querySelectorAll("#mapping-tbody .mapping-group-header").forEach((headerRow) => {
+    headerRow.classList.add("collapsed");
+
+    const td = headerRow.querySelector("td");
+    const tag = headerRow.dataset.groupTag;
+    td.textContent = `▶ ${tag}`;
+
+    let sib = headerRow.nextElementSibling;
+    while (sib && !sib.classList.contains("mapping-group-header")) {
+      sib.style.display = "none";
+      sib = sib.nextElementSibling;
+    }
+  });
+
+  applyMappingFilter();
+});
+
 document.getElementById("mapping-rescan-btn").addEventListener("click", () => {
   mappingRowsKey = null;
   renderMappingTable(latestPlc, latestState);
 });
 
-document.getElementById("mapping-apply-btn").addEventListener("click", () => {
+function applyAllMappings() {
   const mappings = [];
   for (const [key, cells] of Object.entries(mappingCells)) {
     const [tag, point] = key.split("|");
@@ -1266,7 +1434,7 @@ document.getElementById("mapping-apply-btn").addEventListener("click", () => {
     if (value) mappings.push({ object_tag: tag, io_point: point, plc_node: value });
   }
   ws.send(JSON.stringify({ action: "plc_set_mapping", mappings }));
-});
+}
 
 document.getElementById("mapping-validate-btn").addEventListener("click", () => {
   ws.send(JSON.stringify({ action: "plc_validate" }));
