@@ -16,6 +16,7 @@ from core.components.sensor import SensorBehavior
 from core.components.push_button import PushButtonBehavior
 from core.components.emergency_push_button import EmergencyPushButtonBehavior
 from core.components.toggle_switch import ToggleSwitchBehavior
+from core.components.tower_light import TowerLightBehavior
 
 # Maps a serialized "type" string to its behavior class. Extend this as
 # more components are ported (toggle_switch, tower_light, etc.).
@@ -27,6 +28,7 @@ COMPONENT_REGISTRY = {
     "push_button": PushButtonBehavior,
     "emergency_push_button": EmergencyPushButtonBehavior,
     "toggle_switch": ToggleSwitchBehavior,
+    "tower_light": TowerLightBehavior,
 }
 
 TICK_MS = 50

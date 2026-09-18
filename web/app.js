@@ -96,6 +96,13 @@ const PROPERTY_FIELDS = {
     { key: "height", send: "height", label: "Height", type: "number", min: 10, max: 500, suffix: " px" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
+  tower_light: [
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Width", type: "number", min: 10, max: 500, suffix: " px" },
+    { key: "height", send: "height", label: "Height", type: "number", min: 30, max: 1000, suffix: " px" },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+  ],
 };
 
 // Read-only telemetry shown above the editable fields.
@@ -107,6 +114,17 @@ const STATUS_FIELDS = {
   push_button: [["pressed", "Pressed"]],
   emergency_push_button: [["pressed", "Pressed"]],
   toggle_switch: [["on", "On"]],
+  tower_light: [["red", "Red"], ["blue", "Blue"], ["green", "Green"], ["yellow", "Yellow"]],
+};
+
+// Fixed per-lamp colors -- keep in sync with
+// core/components/tower_light.py's LAMP_ORDER.
+const TOWER_LIGHT_LAMP_ORDER = ["red", "blue", "green", "yellow"];
+const TOWER_LIGHT_LIT_COLORS = {
+  red: "#e62828", blue: "#285ae6", green: "#32c83c", yellow: "#e6c81e",
+};
+const TOWER_LIGHT_DIM_COLORS = {
+  red: "#5a2828", blue: "#28325a", green: "#28502d", yellow: "#5a5023",
 };
 
 // Base color per named option, used to fill the button face -- keep in
@@ -307,6 +325,7 @@ function render(state) {
     else if (obj.type === "push_button") renderPushButton(tagName, obj);
     else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj);
     else if (obj.type === "toggle_switch") renderToggleSwitch(tagName, obj);
+    else if (obj.type === "tower_light") renderTowerLight(tagName, obj);
   }
 
   renderComponentsList(state);
@@ -834,6 +853,58 @@ function renderToggleSwitch(tagName, t) {
   el.classList.toggle("on", !!t.on);
 
   el.querySelector(".tag").textContent = `${tagName}  on=${t.on}`;
+}
+
+// Each lamp is independently clickable -- unlike push_button/
+// emergency_push_button/toggle_switch, red/blue/green/yellow are
+// PLC-writable points (setters exist), so clicks go through
+// sendSetPoint (-> apply_command), same as conveyor/cylinder, not
+// sendSetProperty.
+function renderTowerLight(tagName, tl) {
+  const el = getOrCreate(
+    tagName,
+    "tower-ui",
+    (container) => {
+      for (const color of TOWER_LIGHT_LAMP_ORDER) {
+        const lamp = document.createElement("div");
+        lamp.className = "tower-lamp";
+        lamp.dataset.color = color;
+        lamp.addEventListener("pointerdown", (e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          const isLit = !!latestState[tagName]?.[color];
+          sendSetPoint(tagName, color, isLit ? 0 : 1);
+        });
+        container.appendChild(lamp);
+      }
+
+      const tag = document.createElement("div");
+      tag.className = "tag";
+      container.appendChild(tag);
+    },
+    () => {
+      selectComponent(tagName);
+    }
+  );
+
+  el.style.left = `${tl.x}px`;
+  el.style.top = `${tl.y}px`;
+  el.style.width = `${tl.width}px`;
+  el.style.height = `${tl.height}px`;
+  el.style.zIndex = tl.layer || 0;
+
+  for (const color of TOWER_LIGHT_LAMP_ORDER) {
+    const lamp = el.querySelector(`.tower-lamp[data-color="${color}"]`);
+    const lit = !!tl[color];
+    lamp.classList.toggle("lit", lit);
+    lamp.style.setProperty(
+      "--lamp-color",
+      lit ? TOWER_LIGHT_LIT_COLORS[color] : TOWER_LIGHT_DIM_COLORS[color]
+    );
+  }
+
+  el.querySelector(".tag").textContent =
+    `${tagName}  ${TOWER_LIGHT_LAMP_ORDER.map((c) => `${c}=${tl[c]}`).join(" ")}`;
 }
 
 // ---------- Dock: drag components onto the canvas ----------
