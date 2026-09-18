@@ -103,6 +103,19 @@ const PROPERTY_FIELDS = {
     { key: "height", send: "height", label: "Height", type: "number", min: 30, max: 1000, suffix: " px" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
+  label: [
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Width", type: "number", min: 20, max: 2000, suffix: " px" },
+    { key: "height", send: "height", label: "Height", type: "number", min: 16, max: 2000, suffix: " px" },
+    { key: "text", send: "text", label: "Text", type: "text" },
+    { key: "font_family", send: "font_family", label: "Font", type: "text" },
+    { key: "font_size", send: "font_size", label: "Font Size", type: "number", min: 1, max: 200, step: "1" },
+    { key: "bold", send: "bold", label: "Bold", type: "checkbox" },
+    { key: "italic", send: "italic", label: "Italic", type: "checkbox" },
+    { key: "background_color", send: "background_color", label: "Background", type: "color" },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+  ],
 };
 
 // Read-only telemetry shown above the editable fields.
@@ -215,6 +228,16 @@ function renderPropertyPanel() {
 
         return `<label>${f.label}<select data-send="${f.send}">${opts}</select></label>`;
       }
+      if (f.type === "text") {
+        const val = String(obj[f.key] ?? "").replace(/"/g, "&quot;");
+        return `<label>${f.label}<input type="text" data-send="${f.send}" value="${val}"></label>`;
+      }
+      if (f.type === "checkbox") {
+        return `<label class="checkbox-field"><input type="checkbox" data-send="${f.send}" ${obj[f.key] ? "checked" : ""}> ${f.label}</label>`;
+      }
+      if (f.type === "color") {
+        return `<label>${f.label}<input type="color" data-send="${f.send}" value="${obj[f.key]}"></label>`;
+      }
       const max = f.maxKey ? obj[f.maxKey] : f.max;
       const min = f.min !== undefined ? `min="${f.min}"` : "";
       const maxAttr = max !== undefined ? `max="${max}"` : "";
@@ -261,7 +284,8 @@ function renderPropertyPanel() {
   document.getElementById("property-form").addEventListener("submit", (e) => {
     e.preventDefault();
     for (const input of e.target.querySelectorAll("[data-send]")) {
-      sendSetProperty(selectedTag, input.dataset.send, input.value);
+      const value = input.type === "checkbox" ? (input.checked ? 1 : 0) : input.value;
+      sendSetProperty(selectedTag, input.dataset.send, value);
     }
   });
 }
@@ -341,6 +365,7 @@ function render(state) {
     else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj);
     else if (obj.type === "toggle_switch") renderToggleSwitch(tagName, obj);
     else if (obj.type === "tower_light") renderTowerLight(tagName, obj);
+    else if (obj.type === "label") renderLabel(tagName, obj);
   }
 
   renderComponentsList(state);
@@ -920,6 +945,43 @@ function renderTowerLight(tagName, tl) {
 
   el.querySelector(".tag").textContent =
     `${tagName}  ${TOWER_LIGHT_LAMP_ORDER.map((c) => `${c}=${tl[c]}`).join(" ")}`;
+}
+
+// Visual-only annotation -- no PLC points, no click-to-toggle behavior.
+// Text/font/color are all driven by the Properties panel.
+function renderLabel(tagName, l) {
+  const el = getOrCreate(
+    tagName,
+    "label-ui",
+    (container) => {
+      const text = document.createElement("div");
+      text.className = "label-text";
+      container.appendChild(text);
+
+      const tag = document.createElement("div");
+      tag.className = "tag";
+      container.appendChild(tag);
+    },
+    () => {
+      selectComponent(tagName);
+    }
+  );
+
+  el.style.left = `${l.x}px`;
+  el.style.top = `${l.y}px`;
+  el.style.width = `${l.width}px`;
+  el.style.height = `${l.height}px`;
+  el.style.zIndex = l.layer || 0;
+  el.style.background = l.background_color;
+
+  const textEl = el.querySelector(".label-text");
+  textEl.textContent = l.text;
+  textEl.style.fontFamily = l.font_family;
+  textEl.style.fontSize = `${l.font_size}px`;
+  textEl.style.fontWeight = l.bold ? "bold" : "normal";
+  textEl.style.fontStyle = l.italic ? "italic" : "normal";
+
+  el.querySelector(".tag").textContent = tagName;
 }
 
 // ---------- Dock: drag components onto the canvas ----------
