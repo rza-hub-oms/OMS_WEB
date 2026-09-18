@@ -13,14 +13,16 @@ from core.components.conveyor import ConveyorBehavior
 from core.components.cylinder import CylinderBehavior
 from core.components.motor import MotorBehavior
 from core.components.sensor import SensorBehavior
+from core.components.push_button import PushButtonBehavior
 
 # Maps a serialized "type" string to its behavior class. Extend this as
-# more components are ported (motor, sensor, push_button, etc.).
+# more components are ported (toggle_switch, tower_light, etc.).
 COMPONENT_REGISTRY = {
     "conveyor": ConveyorBehavior,
     "cylinder": CylinderBehavior,
     "motor": MotorBehavior,
     "sensor": SensorBehavior,
+    "push_button": PushButtonBehavior,
 }
 
 TICK_MS = 50
@@ -93,10 +95,23 @@ class Scene:
             if obj.valve_type == obj.VALVE_DUAL:
                 extending = obj.extend_command and not obj.retract_command
             else:
+                                                                                             
+            
+                                                  
+                                       
                 extending = obj.extended
 
             if not extending or not obj.target_conveyor:
+                                                                          
+
+                                                                    
+                                        
+
+                                    
                 continue
+
+                                       
+                        
 
             target = self.objects.get(obj.target_conveyor)
             if target is None or not isinstance(target, ConveyorBehavior):
@@ -115,6 +130,7 @@ class Scene:
             for pos in target.box_positions:
                 box_left = target.x + pos
                 box_right = box_left + target.box_width
+                                                                                      
                 box_top = target.y
                 box_bottom = target.y + target.height
 
@@ -126,10 +142,14 @@ class Scene:
                 )
 
                 if not is_hit:
+                                                                  
+                            
+                
                     kept.append(pos)
 
+                                                        
             target.box_positions = kept
-
+                            
     def _update_sensors(self) -> None:
         """Update sensor detection for conveyors and cylinders.
 

@@ -73,6 +73,15 @@ const PROPERTY_FIELDS = {
     { key: "watch_tag", send: "watch_target", label: "Watch Component", type: "component-select" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
+  push_button: [
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Width", type: "number", min: 12, max: 500, suffix: " px" },
+    { key: "height", send: "height", label: "Height", type: "number", min: 12, max: 500, suffix: " px" },
+    { key: "color", send: "color_name", label: "Color", type: "select",
+      options: [["Red", "Red"], ["Green", "Green"], ["Blue", "Blue"], ["Yellow", "Yellow"], ["Gray", "Gray"]] },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+  ],
 };
 
 // Read-only telemetry shown above the editable fields.
@@ -81,6 +90,17 @@ const STATUS_FIELDS = {
   cylinder: [["extended", "Extended"], ["progress", "Progress"], ["moving", "Moving"]],
   motor: [["running", "Running"]],
   sensor: [["detected", "Detected"]],
+  push_button: [["pressed", "Pressed"]],
+};
+
+// Base color per named option, used to fill the button face -- keep in
+// sync with core/components/push_button.py's COLOR_PALETTE names.
+const PUSH_BUTTON_COLORS = {
+  Red: "#dc3c3c",
+  Green: "#3cb454",
+  Blue: "#3c64dc",
+  Yellow: "#e6c828",
+  Gray: "#a0a0a0",
 };
 
 function sendSetProperty(tagName, property, value) {
@@ -268,6 +288,7 @@ function render(state) {
     else if (obj.type === "cylinder") renderCylinder(tagName, obj);
     else if (obj.type === "motor") renderMotor(tagName, obj);
     else if (obj.type === "sensor") renderSensor(tagName, obj);
+    else if (obj.type === "push_button") renderPushButton(tagName, obj);
   }
 
   renderComponentsList(state);
@@ -670,6 +691,56 @@ function renderSensor(tagName, s) {
     `${tagName}  detected=${s.detected}`;
 }
 
+// A momentary control: pressed must follow the mouse being held down,
+// not a click-to-toggle like conveyor/cylinder/motor above. So it's
+// sent via "set_property" (-> Scene.apply_property -> set_pressed()),
+// not "set_point" (-> apply_command, restricted to PLC-writable
+// points) -- a real pushbutton's state is operator input, never
+// written by the PLC. pointer capture (from enableComponentDragging)
+// means pointerup still fires on this element even if the mouse is
+// released after moving off it.
+function renderPushButton(tagName, b) {
+  const el = getOrCreate(
+    tagName,
+    "pushbutton-ui",
+    (container) => {
+      const face = document.createElement("div");
+      face.className = "pushbutton-face";
+      container.appendChild(face);
+
+      const tag = document.createElement("div");
+      tag.className = "tag";
+      container.appendChild(tag);
+
+      const release = () => {
+        if (latestState[tagName]?.pressed) sendSetProperty(tagName, "pressed", 0);
+      };
+
+      container.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        sendSetProperty(tagName, "pressed", 1);
+      });
+      container.addEventListener("pointerup", release);
+      container.addEventListener("pointerleave", release);
+      container.addEventListener("pointercancel", release);
+    },
+    () => {
+      selectComponent(tagName);
+    }
+  );
+
+  el.style.left = `${b.x}px`;
+  el.style.top = `${b.y}px`;
+  el.style.width = `${b.width}px`;
+  el.style.height = `${b.height}px`;
+  el.style.zIndex = b.layer || 0;
+  el.style.setProperty("--btn-color", PUSH_BUTTON_COLORS[b.color] || PUSH_BUTTON_COLORS.Red);
+
+  el.classList.toggle("pressed", !!b.pressed);
+
+  el.querySelector(".tag").textContent = `${tagName}  pressed=${b.pressed}`;
+}
+
 // ---------- Dock: drag components onto the canvas ----------
 
 palette.addEventListener("dragstart", (e) => {
@@ -972,38 +1043,3 @@ function showValidationResult(problems) {
   );
   alert(`${problems.length} mapping error(s) found:\n\n${lines.join("\n\n")}`);
 }
-
-// Grab the properties dock element (adjust class name if necessary)
-const dock = document.querySelector('.properties-dock'); 
-
-let isDown = false;
-let startY;
-let scrollTop;
-
-dock.addEventListener('mousedown', (e) => {
-    isDown = true;
-    dock.classList.add('dragging');
-    // Store the initial mouse Y position and current scroll position
-    startY = e.pageY - dock.offsetTop;
-    scrollTop = dock.scrollTop;
-});
-
-dock.addEventListener('mouseleave', () => {
-    isDown = false;
-    dock.classList.remove('dragging');
-});
-
-dock.addEventListener('mouseup', () => {
-    isDown = false;
-    dock.classList.remove('dragging');
-});
-
-dock.addEventListener('mousemove', (e) => {
-    if (!isDown) return; // Stop the function if mouse is not held down
-    e.preventDefault();
-    
-    const y = e.pageY - dock.offsetTop;
-    // The multiplier (e.g., 1.5 or 2) controls the scroll speed
-    const walk = (y - startY) * 1.5; 
-    dock.scrollTop = scrollTop - walk;
-});
