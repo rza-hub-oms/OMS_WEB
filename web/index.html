@@ -58,38 +58,33 @@
   </section>
 
   <div id="mode-bar">
-    <div class="mode-label">MODE</div>
+    <div class="toolbar-group" id="mode-group">
+      <span class="toolbar-group-label">Mode</span>
+      <button type="button" id="design-mode-btn" class="mode-btn active">Design</button>
+      <button type="button" id="simulation-mode-btn" class="mode-btn">Simulation</button>
+      <button type="button" id="runtime-mode-btn" class="mode-btn">Runtime</button>
+    </div>
 
-    <button
-      type="button"
-      id="design-mode-btn"
-      class="mode-btn active"
-    >
-      DESIGN
-    </button>
+    <div class="toolbar-divider"></div>
 
-    <button
-      type="button"
-      id="simulation-mode-btn"
-      class="mode-btn"
-    >
-      SIMULATION
-    </button>
+    <div class="toolbar-group" id="file-group">
+      <span class="toolbar-group-label">File</span>
+      <button type="button" id="save-project-btn" class="mode-btn">Save</button>
+      <button type="button" id="save-as-project-btn" class="mode-btn">Save As</button>
+      <button type="button" id="open-project-btn" class="mode-btn">Open</button>
+      <input type="file" id="open-project-input" accept=".oms" style="display:none">
+      <span id="current-file-name" class="current-file-name">Untitled</span>
+      <span id="dirty-indicator" class="dirty-indicator hidden">*</span>
+    </div>
 
-    <button
-      type="button"
-      id="runtime-mode-btn"
-      class="mode-btn"
-    >
-      RUNTIME
-    </button>
+    <div class="toolbar-divider"></div>
 
-    <button type="button" id="save-project-btn" class="mode-btn">SAVE</button>
-    <button type="button" id="save-as-project-btn" class="mode-btn">SAVE AS</button>
-    <span id="dirty-indicator" class="dirty-indicator hidden">*</span>
-    <button type="button" id="open-project-btn" class="mode-btn">OPEN</button>
-    <input type="file" id="open-project-input" accept=".oms" style="display:none">
-    <button type="button" id="reset-view-btn" class="mode-btn">RESET VIEW</button>
+    <div class="toolbar-group" id="edit-group">
+      <span class="toolbar-group-label">Edit</span>
+      <button type="button" id="undo-btn" class="mode-btn icon-btn-toolbar" title="Undo">↶</button>
+      <button type="button" id="redo-btn" class="mode-btn icon-btn-toolbar" title="Redo">↷</button>
+      <button type="button" id="reset-view-btn" class="mode-btn">Reset View</button>
+    </div>
 
     <div id="mode-description">
       Engineering / configuration mode
@@ -113,7 +108,6 @@
         <button draggable="true" data-type="toggle_switch">Toggle switch</button>
         <button draggable="true" data-type="tower_light">Tower light</button>
         <button draggable="true" data-type="label">Label</button>
-        <button id="clear-view-btn" title="Remove all components">Clear View</button>
       </div>
     </aside>
 

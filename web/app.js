@@ -66,11 +66,61 @@ function isRuntimeMode() {
   return omsMode === "runtime";
 }
 
-const MODE_DESCRIPTIONS = {
-  design: "Engineering / configuration mode — build the machine.",
-  simulation: "Testing the machine without PLC hardware.",
-  runtime: "Connected to the PLC — live operation.",
-};
+//const MODE_DESCRIPTIONS = {
+//  design: "Engineering / configuration mode — build the machine.",
+//  simulation: "Testing the machine without PLC hardware.",
+//  runtime: "Connected to the PLC — live operation.",
+//};
+
+// ---------- Undo / Redo (Design mode only) ----------
+// History entries are snapshots of scene objects (same shape as a
+// project file's "objects" list). Only component placement/state is
+// tracked -- PLC mapping and connection settings are untouched.
+
+const undoStack = [];
+const redoStack = [];
+const MAX_HISTORY = 50;
+
+function snapshotObjects() {
+  return JSON.stringify(Object.values(latestState));
+}
+
+// Call BEFORE making a design-mode change, so the pushed snapshot is
+// the pre-change state to return to on Undo.
+function pushHistory() {
+  if (!isDesignMode()) return;
+  undoStack.push(snapshotObjects());
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+  const design = isDesignMode();
+  document.getElementById("undo-btn").disabled = !design || undoStack.length === 0;
+  document.getElementById("redo-btn").disabled = !design || redoStack.length === 0;
+}
+
+function restoreSnapshot(snapshot) {
+  ws.send(JSON.stringify({
+    action: "restore_objects",
+    objects: JSON.parse(snapshot),
+  }));
+}
+
+document.getElementById("undo-btn").addEventListener("click", () => {
+  if (!isDesignMode() || undoStack.length === 0) return;
+  redoStack.push(snapshotObjects());
+  restoreSnapshot(undoStack.pop());
+  updateUndoRedoButtons();
+});
+
+document.getElementById("redo-btn").addEventListener("click", () => {
+  if (!isDesignMode() || redoStack.length === 0) return;
+  undoStack.push(snapshotObjects());
+  restoreSnapshot(redoStack.pop());
+  updateUndoRedoButtons();
+});
 
 function updateModeUI() {
   const design = isDesignMode();
@@ -79,22 +129,18 @@ function updateModeUI() {
   simulationModeBtn?.classList.toggle("active", omsMode === "simulation");
   runtimeModeBtn.classList.toggle("active", omsMode === "runtime");
 
-  modeDescription.textContent = MODE_DESCRIPTIONS[omsMode] || "";
+  //modeDescription.textContent = MODE_DESCRIPTIONS[omsMode] || "";
 
   document.body.classList.remove("mode-design", "mode-simulation", "mode-runtime");
   document.body.classList.add(`mode-${omsMode}`);
 
-  // Components palette + Clear View are DESIGN-only operations.
+  // Components palette is a DESIGN-only operation.
   palette.style.pointerEvents = design ? "auto" : "none";
   palette.style.opacity = design ? "1" : "0.45";
 
-  const clearButton = document.getElementById("clear-view-btn");
-  if (clearButton) {
-    clearButton.disabled = !design;
-  }
-
   document.getElementById("open-project-btn").disabled = !design;
   document.getElementById("reset-view-btn").disabled = !design;
+  updateUndoRedoButtons();
 
   updateRuntimeAlarmBar();
 
@@ -365,8 +411,8 @@ function deselectAll() {
 
 // Clicking empty canvas space (not a component) clears the selection,
 // which also hides the now-unselected components' .tag labels.
-canvas.addEventListener("click", (e) => {
-  if (e.target === canvas) deselectAll();
+canvasViewport.addEventListener("click", (e) => {
+  if (e.target === canvas || e.target === canvasViewport) deselectAll();
 });
 
 function renderPropertyPanel() {
@@ -491,12 +537,14 @@ function renderPropertyPanel() {
     if (!selectedTag || !newName || newName === selectedTag) return;
 
     sendSetProperty(selectedTag, "name", newName);
+    pushHistory();
     markDirty();
     selectedTag = newName;
   });
 
   document.getElementById("property-form").addEventListener("submit", (e) => {
     e.preventDefault();
+    pushHistory();
     markDirty();
     for (const input of e.target.querySelectorAll("[data-send]")) {
       const value = input.type === "checkbox" ? (input.checked ? 1 : 0) : input.value;
@@ -546,6 +594,7 @@ function sendSetPoint(tagName, point, value) {
 }
 
 function sendAddComponent(componentType, x, y) {
+  pushHistory();
   markDirty();
   ws.send(JSON.stringify({ action: "add_component", component_type: componentType, x, y }));
 }
@@ -613,14 +662,6 @@ document.getElementById("save-as-project-btn").addEventListener("click", async (
   saveProjectAsClassic();
 });
 
-document.getElementById("clear-view-btn").addEventListener("click", () => {
-  if (!confirm("Clear all components?")) return;
-  markDirty();
-  for (const tagName of Object.keys(elements)) {
-    ws.send(JSON.stringify({ action: "delete_component", tag_name: tagName }));
-  }
-});
-
 document.getElementById("open-project-btn").addEventListener("click", () => {
   document.getElementById("open-project-input").click();
 });
@@ -666,6 +707,7 @@ document.getElementById("open-project-input").addEventListener("change", async (
     updateFileNameUI();
     markClean();
     deselectAll();
+    applyLoadedConnectionSettings(data.plc_connection);
     ws.send(JSON.stringify({ action: "load_project", data }));
   };
   reader.readAsText(file);
@@ -675,12 +717,14 @@ document.getElementById("open-project-input").addEventListener("change", async (
 document.getElementById("reset-view-btn").addEventListener("click", () => {
   if (!isDesignMode()) return;
   if (!confirm("Remove all components from the simulation area?")) return;
+  pushHistory();
   markDirty();
   ws.send(JSON.stringify({ action: "reset_view" }));
 });
 
 function sendDeleteComponent(tagName) {
   if (!tagName) return;
+  pushHistory();
   markDirty();
   ws.send(JSON.stringify({
     action: "delete_component",
@@ -724,6 +768,52 @@ function render(state) {
 
 let componentsListKey = null;
 
+// Two-letter monogram + accent color per component type, so the list
+// reads at a glance instead of showing bare tag names.
+const TYPE_BADGE = {
+  conveyor: { label: "CV", color: "#3a7bd5" },
+  cylinder: { label: "CY", color: "#c9822e" },
+  motor: { label: "MO", color: "#3cce80" },
+  sensor: { label: "SE", color: "#a259d9" },
+  push_button: { label: "PB", color: "#4aa3df" },
+  emergency_push_button: { label: "EP", color: "#f35361" },
+  toggle_switch: { label: "TS", color: "#2eb8a3" },
+  tower_light: { label: "TL", color: "#d9a029" },
+  label: { label: "LB", color: "#8493a3" },
+};
+
+const TYPE_LABEL = {
+  conveyor: "Conveyor",
+  cylinder: "Cylinder",
+  motor: "Motor",
+  sensor: "Sensor",
+  push_button: "Push button",
+  emergency_push_button: "Emergency PB",
+  toggle_switch: "Toggle switch",
+  tower_light: "Tower light",
+  label: "Label",
+};
+
+// Field to read for the live status dot -- omitted types (e.g. "label")
+// just don't get a dot.
+const STATUS_FIELD = {
+  conveyor: "running",
+  motor: "running",
+  cylinder: "extended",
+  sensor: "detected",
+  push_button: "pressed",
+  emergency_push_button: "pressed",
+  toggle_switch: "on",
+};
+
+function isComponentActive(obj) {
+  if (obj.type === "tower_light") {
+    return Object.values(obj.lamp_states || {}).some(Boolean);
+  }
+  const field = STATUS_FIELD[obj.type];
+  return field ? !!obj[field] : null; // null -- this type has no status dot
+}
+
 function renderComponentsList(state) {
   const list = document.getElementById("components-list");
   const tags = Object.keys(state);
@@ -733,16 +823,37 @@ function renderComponentsList(state) {
     componentsListKey = key;
     list.innerHTML = "";
     for (const tagName of tags) {
+      const obj = state[tagName];
+      const badge = TYPE_BADGE[obj.type] || { label: "??", color: "#8493a3" };
+
       const li = document.createElement("li");
-      li.textContent = tagName;
+      li.className = "component-row";
       li.dataset.tag = tagName;
-      //li.addEventListener("click", () => selectComponent(tagName));
+
+      li.innerHTML = `
+        <span class="component-badge" style="background:${badge.color}">${badge.label}</span>
+        <span class="component-info">
+          <span class="component-name"></span>
+          <span class="component-type">${TYPE_LABEL[obj.type] || obj.type}</span>
+        </span>
+        <span class="component-status-dot"></span>
+      `;
+      li.querySelector(".component-name").textContent = tagName;
       list.appendChild(li);
     }
   }
 
   for (const li of list.children) {
-    li.classList.toggle("selected", li.dataset.tag === selectedTag);
+    const tagName = li.dataset.tag;
+    const obj = state[tagName];
+    li.classList.toggle("selected", tagName === selectedTag);
+
+    if (obj) {
+      const active = isComponentActive(obj);
+      const dot = li.querySelector(".component-status-dot");
+      dot.classList.toggle("hidden", active === null);
+      dot.classList.toggle("on", !!active);
+    }
   }
 }
 
@@ -824,6 +935,7 @@ function enableComponentDragging(el, tagName) {
     const dy = e.clientY - startY;
 
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      if (!moved) pushHistory();
       moved = true;
     }
 
@@ -889,6 +1001,7 @@ document.addEventListener("keydown", (e) => {
   }
 
   e.preventDefault();
+  pushHistory();
   markDirty(); 
 
   const obj = latestState[selectedTag];
@@ -1376,10 +1489,10 @@ canvasViewport.addEventListener("drop", (e) => {
   const rect = canvasViewport.getBoundingClientRect();
 
   const x =
-    (e.clientX - rect.left - simulationPanX) / simulationZoom;
+    Math.round((e.clientX - rect.left - simulationPanX) / simulationZoom);
 
   const y =
-    (e.clientY - rect.top - simulationPanY) / simulationZoom;
+    Math.round((e.clientY - rect.top - simulationPanY) / simulationZoom);
 
   sendAddComponent(componentType, x, y);
 });
@@ -1406,6 +1519,33 @@ backendSelect.addEventListener("change", (e) => {
   document.getElementById("plc-opcua-fields").style.display = isS7 ? "none" : "";
   document.getElementById("plc-s7-fields").style.display = isS7 ? "" : "none";
 });
+
+// Prefills the connect form from a loaded project's saved connection
+// settings (backend + params) -- does NOT auto-connect, just repopulates
+// the fields so the user can hit Connect again without retyping.
+function applyLoadedConnectionSettings(plcConnection) {
+  if (!plcConnection || !plcConnection.backend) return;
+  const { backend, params = {} } = plcConnection;
+
+  backendSelect.value = backend;
+  backendSelectInitialized = true;
+  backendSelect.dispatchEvent(new Event("change"));
+
+  if (backend === "s7") {
+    document.getElementById("plc-ip").value = params.ip || "";
+    document.getElementById("plc-rack").value = params.rack ?? 0;
+    document.getElementById("plc-slot").value = params.slot ?? 1;
+  } else {
+    document.getElementById("plc-url").value = params.url || "";
+    document.getElementById("plc-username").value = params.username || "";
+    document.getElementById("plc-password").value = params.password || "";
+    if (params.security_policy) {
+      document.getElementById("plc-security").value = params.security_policy;
+    }
+    document.getElementById("plc-cert").value = params.certificate_path || "";
+    document.getElementById("plc-key").value = params.private_key_path || "";
+  }
+}
 
 document.getElementById("plc-connect-btn").addEventListener("click", () => {
   const backend = backendSelect.value;
@@ -1636,6 +1776,10 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
       if (e.key === "Enter") {
         applyAllMappings();
       }
+    });
+
+    nodeInput.addEventListener("blur", () => {
+      applyAllMappings();
     });
 
     // Force value using ENTER

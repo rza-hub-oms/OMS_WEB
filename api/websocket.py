@@ -7,6 +7,7 @@ broadcasts Scene state to every connected browser.
 import asyncio
 import json
 import logging
+import os
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -25,24 +26,55 @@ router = APIRouter()
 # The three OMS modes, in the order they appear in the mode bar.
 VALID_MODES = ("design", "simulation", "runtime")
 
+# How long to wait, after the last browser window disconnects, before
+# actually shutting the process down. A simple page refresh also drops
+# and re-opens the WebSocket -- this grace period lets that reconnect
+# cancel the shutdown instead of killing the whole app on a refresh.
+SHUTDOWN_GRACE_S = 5.0
+
 
 class ConnectionManager:
     """Tracks connected browser clients and broadcasts JSON state to all
     of them. Kept separate from the Scene itself, since the Scene knows
-    nothing about WebSockets."""
+    nothing about WebSockets.
+
+    Also shuts the backend process down once the last browser window
+    closes (mirrors main.py auto-opening the browser on start -- this
+    is the reverse: closing the browser stops the backend too)."""
 
     def __init__(self):
         self.active: list[WebSocket] = []
+        self._shutdown_task = None
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
         self.active.append(ws)
+
+        if self._shutdown_task is not None:
+            self._shutdown_task.cancel()
+            self._shutdown_task = None
+
         logger.info("Client connected (%d total)", len(self.active))
 
     def disconnect(self, ws: WebSocket) -> None:
         if ws in self.active:
             self.active.remove(ws)
         logger.info("Client disconnected (%d total)", len(self.active))
+
+        if not self.active and self._shutdown_task is None:
+            self._shutdown_task = asyncio.get_event_loop().create_task(
+                self._shutdown_after_grace()
+            )
+
+    async def _shutdown_after_grace(self) -> None:
+        try:
+            await asyncio.sleep(SHUTDOWN_GRACE_S)
+        except asyncio.CancelledError:
+            return
+
+        if not self.active:
+            logger.info("No browser windows connected -- shutting down.")
+            os._exit(0)
 
     async def broadcast(self, payload: dict) -> None:
         message = json.dumps(payload)
@@ -206,6 +238,13 @@ async def websocket_endpoint(ws: WebSocket):
                         continue
                     from project.serialization import load_project_dict
                     load_project_dict(server.scene, command.get("data", {}))
+                elif action == "restore_objects":
+                    # Undo/Redo: replaces component placement/state only --
+                    # PLC mapping and connection settings are untouched.
+                    if server.mode != "design":
+                        continue
+                    from project.serialization import load_objects_only
+                    load_objects_only(server.scene, command.get("objects", []))
                 elif action == "reset_view":
                     if server.mode != "design":
                         continue
@@ -247,6 +286,7 @@ async def _plc_connect(server, backend: str, params: dict) -> None:
         _plc_disconnect(server)
 
     server._last_connect_error = None
+    server.scene.plc_connection = {"backend": backend, "params": dict(params)}
     try:
         sync = create_plc_sync(backend, server.scene, **params)
         await asyncio.wait_for(
@@ -328,7 +368,7 @@ async def tick_loop(scene) -> None:
         # animate -- they differ in where commands come from, not
         # whether the scene moves.
         scene.tick(TICK_MS, simulate=(server.mode != "design"))
-        if server.plc_sync is not None:
+        if server.plc_sync is not None and server.mode == "runtime":
             server.plc_sync.poll()
         await manager.broadcast({"objects": scene.to_dict(), "plc": _plc_status(), "mode": server.mode,})
         await asyncio.sleep(interval_sec)

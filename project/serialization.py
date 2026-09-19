@@ -16,24 +16,13 @@ _SETTER_OVERRIDES = {
 }
 
 
-def scene_to_project_dict(scene) -> dict:
-    return {
-        "version": PROJECT_VERSION,
-        "objects": [obj.to_dict() for obj in scene.objects.values()],
-        "plc_mapping": list(scene.plc_mapping),
-        "type_counters": dict(scene._type_counters),
-    }
-
-
-def load_project_dict(scene, data: dict) -> None:
-    """Replaces the scene's contents in place. Unknown component types
-    are skipped rather than raising."""
-    scene.objects.clear()
-    scene._cylinder_previously_extended.clear()
-    scene.plc_mapping = list(data.get("plc_mapping", []))
-    scene._type_counters = dict(data.get("type_counters", {}))
-
-    for state in data.get("objects", []):
+def _build_objects(scene, objects_data) -> dict:
+    """Constructs live scene objects from a list of to_dict()-shaped
+    states (as found in a project file's "objects" list). Returns a
+    {tag_name: obj} dict; unknown component types are skipped rather
+    than raising."""
+    built = {}
+    for state in objects_data:
         behavior_cls = COMPONENT_REGISTRY.get(state.get("type"))
         if behavior_cls is None:
             continue
@@ -56,4 +45,36 @@ def load_project_dict(scene, data: dict) -> None:
             except (TypeError, ValueError):
                 pass
 
-        scene.add(obj)
+        built[obj.tag_name] = obj
+
+    return built
+
+
+def scene_to_project_dict(scene) -> dict:
+    return {
+        "version": PROJECT_VERSION,
+        "objects": [obj.to_dict() for obj in scene.objects.values()],
+        "plc_mapping": list(scene.plc_mapping),
+        "plc_connection": dict(scene.plc_connection),
+        "type_counters": dict(scene._type_counters),
+    }
+
+
+def load_project_dict(scene, data: dict) -> None:
+    """Replaces the scene's contents in place. Unknown component types
+    are skipped rather than raising."""
+    scene.objects.clear()
+    scene._cylinder_previously_extended.clear()
+    scene.plc_mapping = list(data.get("plc_mapping", []))
+    scene.plc_connection = dict(data.get("plc_connection", {}))
+    scene._type_counters = dict(data.get("type_counters", {}))
+    scene.objects.update(_build_objects(scene, data.get("objects", [])))
+
+
+def load_objects_only(scene, objects_data) -> None:
+    """Like load_project_dict, but replaces only scene.objects --
+    leaves plc_mapping, plc_connection and type_counters untouched.
+    Used for Undo/Redo, which should not disturb PLC configuration."""
+    scene.objects.clear()
+    scene._cylinder_previously_extended.clear()
+    scene.objects.update(_build_objects(scene, objects_data))

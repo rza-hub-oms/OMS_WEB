@@ -49,6 +49,12 @@ class Scene:
         # plc.plc_sync.PlcSyncBase._resolve_mapped_points().
         self.plc_mapping = []
 
+        # {"backend": "s7", "params": {"ip": "...", "rack": 0, "slot": 1}}
+        # or {} if never configured. Set by api/websocket.py's
+        # _plc_connect() and persisted so Save Project remembers the
+        # connection settings (not the live connection itself).
+        self.plc_connection = {}
+
         self._cylinder_previously_extended = {}  
 
     def add(self, obj) -> None:
@@ -155,24 +161,11 @@ class Scene:
             # Only collide while the cylinder is commanded to extend.
             if obj.valve_type == obj.VALVE_DUAL:
                 extending = obj.extend_command and not obj.retract_command
-            else:
-                                                                                             
-            
-                                                  
-                                       
+            else:                         
                 extending = obj.extended
 
-            if not extending or not obj.target_conveyor:
-                                                                          
-
-                                                                    
-                                        
-
-                                    
+            if not extending or not obj.target_conveyor or obj.progress < 1.0:                   
                 continue
-
-                                       
-                        
 
             target = self.objects.get(obj.target_conveyor)
             if target is None or not isinstance(target, ConveyorBehavior):
