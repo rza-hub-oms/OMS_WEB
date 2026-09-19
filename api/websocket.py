@@ -126,6 +126,8 @@ async def websocket_endpoint(ws: WebSocket):
         {"action": "plc_set_mapping", "mappings": [{"object_tag", "io_point", "plc_node"}, ...]}
         {"action": "plc_force", "tag_name": "...", "io_point": "...", "value": "..."}
         {"action": "plc_validate"}
+        {"action": "plc_import_s7_db", "text": "<pasted TIA 'Generate source' .db text>", "db_number": 1}
+        {"action": "plc_browse_opcua", "node_id": "ns=3;s=..." or omitted for the root}
     Outgoing messages (pushed by the tick loop, not sent from here):
         {"objects": {"Conveyor_1": {...}, ...}, "plc": {...}}
     """
@@ -233,6 +235,21 @@ async def websocket_endpoint(ws: WebSocket):
                     server.scene.force_value(
                         command["tag_name"], command["io_point"], command["value"],
                     )
+                elif action == "plc_import_s7_db":
+                    from plc.s7_db_import import parse_db_source, S7ImportError
+                    try:
+                        tags, warnings = parse_db_source(
+                            command.get("text", ""), command.get("db_number"),
+                        )
+                        await ws.send_text(json.dumps({
+                            "s7_import_result": {"tags": tags, "warnings": warnings},
+                        }))
+                    except S7ImportError as exc:
+                        await ws.send_text(json.dumps({
+                            "s7_import_result": {"error": str(exc)},
+                        }))
+                elif action == "plc_browse_opcua":
+                    await _plc_browse_opcua(server, ws, command.get("node_id"))
                 elif action == "load_project":
                     if server.mode != "design":
                         continue
@@ -309,6 +326,43 @@ async def _plc_connect(server, backend: str, params: dict) -> None:
 
     server.plc_sync = sync
     server.selected_plc_backend = backend
+
+
+BROWSE_TIMEOUT_S = 10.0
+
+
+async def _plc_browse_opcua(server, ws, node_id) -> None:
+    """Browses one level of the connected OPC UA server's node tree
+    for the Mapping panel's tag picker. Needs a live connection --
+    unlike the S7 DB importer, there's no offline file to read here,
+    the server itself is the address list."""
+    sync = server.plc_sync
+    if sync is None or not sync.is_connected or sync._client is None:
+        await ws.send_text(json.dumps({
+            "opcua_browse_result": {"error": "Connect to the PLC first."},
+        }))
+        return
+
+    from plc.opcua_browse import browse_node
+    try:
+        children = await asyncio.wait_for(
+            asyncio.to_thread(browse_node, sync._client, node_id),
+            timeout=BROWSE_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        await ws.send_text(json.dumps({
+            "opcua_browse_result": {"error": "Browse timed out."},
+        }))
+        return
+    except Exception as exc:
+        await ws.send_text(json.dumps({
+            "opcua_browse_result": {"error": str(exc)},
+        }))
+        return
+
+    await ws.send_text(json.dumps({
+        "opcua_browse_result": {"node_id": node_id, "children": children},
+    }))
 
 
 def _plc_disconnect(server) -> None:

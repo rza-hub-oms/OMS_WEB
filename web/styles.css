@@ -1361,3 +1361,173 @@ button:hover { background: #25445c; border-color: #3488c7; }
 .dirty-indicator.hidden { display: none; }
 
 .current-file-name { color: var(--muted); font-size: 12px; }
+
+/* ---------- PLC tag import / picker (node-address helper) ---------- */
+
+.node-input-wrap {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.node-input-wrap .node-input { min-width: 0; flex: 1; }
+
+.browse-node-btn {
+  flex: none;
+  padding: 4px 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 8, 12, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-overlay.hidden { display: none; }
+
+.modal-box {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #20303e;
+  font-weight: 600;
+  color: #dce5ef;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 2px 6px;
+  margin: 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.modal-close:hover { color: var(--ink); background: none; }
+
+.modal-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #8ca0b2;
+  font-size: 11px;
+}
+
+.modal-field input {
+  padding: 6px 8px;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #3a4d5d;
+  border-radius: 3px;
+  font: inherit;
+}
+
+#s7-import-text {
+  width: 100%;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #3a4d5d;
+  border-radius: 3px;
+  font: 12px "Consolas", "Courier New", monospace;
+  padding: 8px;
+  resize: vertical;
+}
+
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-actions button { margin: 0; }
+
+.mini-table-wrap {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #20303e;
+  border-radius: 4px;
+}
+
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mini-table th, .mini-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #1c2732;
+  text-align: left;
+}
+
+.mini-table th {
+  background: #17222d;
+  color: #8ca0b2;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.breadcrumb.hidden { display: none; }
+
+.breadcrumb-crumb { cursor: pointer; }
+.breadcrumb-crumb:hover { color: var(--blue); text-decoration: underline; }
+.breadcrumb-crumb.current { color: var(--ink); cursor: default; text-decoration: none; }
+.breadcrumb-sep { color: #445466; }
+
+.tag-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #20303e;
+  border-radius: 4px;
+}
+
+.tag-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #1c2732;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tag-picker-row:last-child { border-bottom: none; }
+.tag-picker-row:hover { background: #1b2732; }
+
+.tag-picker-name { flex: 1; color: #dce5ef; }
+.tag-picker-type { color: var(--muted); font-size: 11px; }
+.tag-picker-address { color: #7fb8e8; font-family: "Consolas", "Courier New", monospace; font-size: 11px; }

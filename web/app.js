@@ -571,6 +571,16 @@ ws.onmessage = (event) => {
     return;
   }
 
+  if (msg.s7_import_result !== undefined) {
+    handleS7ImportResult(msg.s7_import_result);
+    return;
+  }
+
+  if (msg.opcua_browse_result !== undefined) {
+    handleOpcuaBrowseResult(msg.opcua_browse_result);
+    return;
+  }
+
   if (msg.mode_error) {
     alert(msg.mode_error);
     return;
@@ -1754,7 +1764,10 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
       <td>${row.point}</td>
       <td class="center">${direction}</td>
       <td>
-        <input type="text" class="node-input">
+        <div class="node-input-wrap">
+          <input type="text" class="node-input">
+          <button type="button" class="browse-node-btn" title="Browse available PLC tags">⌕</button>
+        </div>
       </td>
       <td class="center live-value">—</td>
       <td>
@@ -1780,6 +1793,10 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
 
     nodeInput.addEventListener("blur", () => {
       applyAllMappings();
+    });
+
+    tr.querySelector(".browse-node-btn").addEventListener("click", () => {
+      openTagPicker(nodeInput);
     });
 
     // Force value using ENTER
@@ -1976,6 +1993,228 @@ function showValidationResult(problems) {
     `${i + 1}. ${p.object_tag} \u2192 ${p.io_point}\n   PLC address: ${p.plc_node}\n   Problem: ${p.error}`
   );
   alert(`${problems.length} mapping error(s) found:\n\n${lines.join("\n\n")}`);
+}
+
+// ---------- S7 DB import (TIA Portal "Generate source" paste-in) ----------
+//
+// Parsing/offset math happens server-side (plc/s7_db_import.py) --
+// the result is cached here client-side only (not persisted to the
+// project file) so the tag picker below has something to offer for
+// the s7 backend.
+let importedS7Tags = [];
+
+const s7ImportModal = document.getElementById("s7-import-modal");
+
+document.getElementById("mapping-import-s7-btn").addEventListener("click", () => {
+  document.getElementById("s7-import-error").textContent = "";
+  document.getElementById("s7-import-preview-wrap").classList.add("hidden");
+  s7ImportModal.classList.remove("hidden");
+});
+
+document.getElementById("s7-import-close").addEventListener("click", () => {
+  s7ImportModal.classList.add("hidden");
+});
+
+document.getElementById("s7-import-parse-btn").addEventListener("click", () => {
+  const text = document.getElementById("s7-import-text").value;
+  const dbNumRaw = document.getElementById("s7-import-dbnum").value.trim();
+  const payload = { action: "plc_import_s7_db", text };
+  if (dbNumRaw) payload.db_number = parseInt(dbNumRaw, 10);
+  ws.send(JSON.stringify(payload));
+});
+
+let _pendingS7ImportTags = [];
+
+function handleS7ImportResult(result) {
+  const errorEl = document.getElementById("s7-import-error");
+  const previewWrap = document.getElementById("s7-import-preview-wrap");
+
+  if (result.error) {
+    errorEl.textContent = result.error;
+    previewWrap.classList.add("hidden");
+    return;
+  }
+
+  errorEl.textContent = (result.warnings || []).join(" ");
+  _pendingS7ImportTags = result.tags || [];
+
+  document.getElementById("s7-import-summary").textContent =
+    `${_pendingS7ImportTags.length} addressable tag(s) found.`;
+
+  const tbody = document.getElementById("s7-import-preview-tbody");
+  tbody.innerHTML = "";
+  for (const tag of _pendingS7ImportTags) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${tag.name}</td><td>${tag.dtype}</td><td>${tag.address}</td>`;
+    tbody.appendChild(tr);
+  }
+  previewWrap.classList.toggle("hidden", _pendingS7ImportTags.length === 0);
+}
+
+document.getElementById("s7-import-use-btn").addEventListener("click", () => {
+  importedS7Tags = _pendingS7ImportTags;
+  s7ImportModal.classList.add("hidden");
+});
+
+// ---------- PLC tag / node picker ----------
+//
+// One modal serves both sources: the imported S7 tag list (flat,
+// filtered by search) and a live OPC UA browse (drills down through
+// the server's node tree via breadcrumbs). Which one opens depends
+// on the currently selected backend (latestPlc.backend).
+const tagPickerModal = document.getElementById("tag-picker-modal");
+let tagPickerTargetInput = null;
+let tagPickerMode = null;          // "s7" | "opcua"
+let opcuaBreadcrumb = [];          // [{name, node_id}, ...]
+
+function openTagPicker(nodeInput) {
+  tagPickerTargetInput = nodeInput;
+  // Prefer the server's last-connected backend once one is known (it
+  // reflects reality, including a live connection for OPC UA); before
+  // any connect attempt has happened, fall back to whatever's chosen
+  // in the Backend dropdown -- browsing imported S7 tags doesn't need
+  // a live connection at all, so there's no reason to force one just
+  // to open the picker.
+  const backend = latestPlc.backend || document.getElementById("plc-backend-select").value;
+
+  if (backend === "s7") {
+    tagPickerMode = "s7";
+    document.getElementById("tag-picker-title").textContent = "Select S7 Tag";
+    document.getElementById("tag-picker-breadcrumb").classList.add("hidden");
+    document.getElementById("tag-picker-filter").value = "";
+    renderS7TagPickerList("");
+    tagPickerModal.classList.remove("hidden");
+    document.getElementById("tag-picker-filter").focus();
+  } else if (backend === "asyncua" || backend === "opcua") {
+    if (!latestPlc.connected) {
+      alert("Connect to the PLC first, then browse its live tags.");
+      return;
+    }
+    tagPickerMode = "opcua";
+    document.getElementById("tag-picker-title").textContent = "Browse OPC UA Server";
+    document.getElementById("tag-picker-filter").value = "";
+    opcuaBreadcrumb = [{ name: "Objects", node_id: null }];
+    tagPickerModal.classList.remove("hidden");
+    requestOpcuaBrowse(null);
+  } else {
+    alert("Select a connection type in the PLC Connection panel first.");
+  }
+}
+
+document.getElementById("tag-picker-close").addEventListener("click", () => {
+  tagPickerModal.classList.add("hidden");
+});
+
+document.getElementById("tag-picker-filter").addEventListener("input", (e) => {
+  if (tagPickerMode === "s7") renderS7TagPickerList(e.target.value.trim().toLowerCase());
+});
+
+function pickTagAddress(address) {
+  if (!tagPickerTargetInput) return;
+  tagPickerTargetInput.value = address;
+  tagPickerTargetInput.dispatchEvent(new Event("input"));
+  applyAllMappings();
+  tagPickerModal.classList.add("hidden");
+}
+
+function renderS7TagPickerList(filterText) {
+  const list = document.getElementById("tag-picker-list");
+  const empty = document.getElementById("tag-picker-empty");
+  list.innerHTML = "";
+
+  if (importedS7Tags.length === 0) {
+    empty.textContent = 'No S7 tags imported yet -- use "Import S7 DB..." below the mapping table first.';
+    empty.classList.remove("hidden");
+    return;
+  }
+
+  const matches = importedS7Tags.filter((t) =>
+    !filterText ||
+    t.name.toLowerCase().includes(filterText) ||
+    t.address.toLowerCase().includes(filterText)
+  );
+
+  empty.classList.toggle("hidden", matches.length > 0);
+  empty.textContent = "No tags match that search.";
+
+  for (const tag of matches) {
+    const row = document.createElement("div");
+    row.className = "tag-picker-row";
+    row.innerHTML = `<span class="tag-picker-name">${tag.name}</span>
+      <span class="tag-picker-type">${tag.dtype}</span>
+      <span class="tag-picker-address">${tag.address}</span>`;
+    row.addEventListener("click", () => pickTagAddress(tag.address));
+    list.appendChild(row);
+  }
+}
+
+function requestOpcuaBrowse(nodeId) {
+  ws.send(JSON.stringify({ action: "plc_browse_opcua", node_id: nodeId }));
+}
+
+function handleOpcuaBrowseResult(result) {
+  const list = document.getElementById("tag-picker-list");
+  const empty = document.getElementById("tag-picker-empty");
+
+  if (result.error) {
+    list.innerHTML = "";
+    empty.textContent = result.error;
+    empty.classList.remove("hidden");
+    return;
+  }
+
+  renderOpcuaBreadcrumb();
+
+  const filterText = document.getElementById("tag-picker-filter").value.trim().toLowerCase();
+  const children = (result.children || []).filter((c) =>
+    !filterText || c.name.toLowerCase().includes(filterText)
+  );
+
+  list.innerHTML = "";
+  empty.classList.toggle("hidden", children.length > 0);
+  empty.textContent = "No child nodes here.";
+
+  for (const child of children) {
+    const row = document.createElement("div");
+    row.className = "tag-picker-row";
+    row.innerHTML = `<span class="tag-picker-name">${child.is_variable ? "🔧" : "📁"} ${child.name}</span>
+      <span class="tag-picker-type">${child.node_class}</span>`;
+    row.addEventListener("click", () => {
+      if (child.is_variable) {
+        pickTagAddress(child.node_id);
+      } else {
+        opcuaBreadcrumb.push({ name: child.name, node_id: child.node_id });
+        requestOpcuaBrowse(child.node_id);
+      }
+    });
+    list.appendChild(row);
+  }
+}
+
+function renderOpcuaBreadcrumb() {
+  const el = document.getElementById("tag-picker-breadcrumb");
+  el.classList.remove("hidden");
+  el.innerHTML = "";
+  opcuaBreadcrumb.forEach((crumb, i) => {
+    const span = document.createElement("span");
+    span.className = "breadcrumb-crumb";
+    span.textContent = crumb.name;
+    if (i < opcuaBreadcrumb.length - 1) {
+      span.addEventListener("click", () => {
+        opcuaBreadcrumb = opcuaBreadcrumb.slice(0, i + 1);
+        requestOpcuaBrowse(crumb.node_id);
+      });
+    } else {
+      span.classList.add("current");
+    }
+    el.appendChild(span);
+    if (i < opcuaBreadcrumb.length - 1) {
+      const sep = document.createElement("span");
+      sep.className = "breadcrumb-sep";
+      sep.textContent = "›";
+      el.appendChild(sep);
+    }
+  });
 }
 
 function applySimulationTransform() {

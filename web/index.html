@@ -170,12 +170,65 @@
         <div class="mapping-actions">
           <button id="mapping-rescan-btn">Rescan Scene</button>
           <button id="mapping-validate-btn">Validate Mappings</button>
+          <button id="mapping-import-s7-btn">Import S7 DB...</button>
         </div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
           <ul id="components-list"></ul>
       </div>
     </aside>
+  </div>
+
+  <div id="s7-import-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>Import S7 Data Block</span>
+        <button type="button" class="modal-close" id="s7-import-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">
+          In TIA Portal: right-click the DB → <b>Generate source</b>, open the
+          resulting .db file in a text editor, and paste its contents below.
+          The DB needs <b>Optimized block access</b> turned off, or there's no
+          fixed byte layout to compute addresses from.
+        </p>
+        <label class="modal-field">DB number
+          <input id="s7-import-dbnum" type="number" min="1" placeholder="e.g. 1 (auto-filled if the header names it DB1, DB2, ...)">
+        </label>
+        <textarea id="s7-import-text" rows="10" placeholder="Paste the generated DB source text here..."></textarea>
+        <div class="modal-actions">
+          <button type="button" id="s7-import-parse-btn" class="apply">Parse</button>
+        </div>
+        <p id="s7-import-error" class="plc-error"></p>
+        <div id="s7-import-preview-wrap" class="hidden">
+          <p id="s7-import-summary" class="hint"></p>
+          <div id="s7-import-preview-wrap-inner" class="mini-table-wrap">
+            <table class="mini-table">
+              <thead><tr><th>Name</th><th>Type</th><th>Address</th></tr></thead>
+              <tbody id="s7-import-preview-tbody"></tbody>
+            </table>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="s7-import-use-btn" class="apply">Use These Tags</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tag-picker-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span id="tag-picker-title">Select PLC Address</span>
+        <button type="button" class="modal-close" id="tag-picker-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="tag-picker-breadcrumb" class="breadcrumb hidden"></div>
+        <input id="tag-picker-filter" type="text" placeholder="Search...">
+        <div id="tag-picker-list" class="tag-picker-list"></div>
+        <p id="tag-picker-empty" class="hint hidden"></p>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
