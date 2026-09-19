@@ -86,6 +86,20 @@ class Scene:
             for obj in self.objects.values()
         )
 
+    def stop_all_actuators(self) -> None:
+        for obj in self.objects.values():
+            if isinstance(obj, (ConveyorBehavior, MotorBehavior)):
+                obj.set_running(False)
+
+    def reset_simulation_state(self) -> None:
+        """Clears every component from the scene -- used by the "Reset
+        View" button. Equivalent to Clear View, but done as one
+        backend call instead of one delete_component message per
+        component."""
+        self.objects.clear()
+        self._type_counters.clear()
+        self._cylinder_previously_extended.clear()
+
     def tick(self, dt_ms: float = TICK_MS, simulate: bool = True) -> None:
         """Advance every component by one simulation step, then update
         sensor detection against the now-current box positions.

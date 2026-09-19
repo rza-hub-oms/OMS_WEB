@@ -1232,3 +1232,8 @@ button:hover { background: #25445c; border-color: #3488c7; }
 #runtime-alarm-bar.hidden {
   display: none;
 }
+
+.dirty-indicator { color: #e63c3c; font-weight: bold; margin-left: 4px; }
+.dirty-indicator.hidden { display: none; }
+
+.current-file-name { margin-left: 10px; color: var(--muted); font-size: 12px; }

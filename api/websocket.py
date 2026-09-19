@@ -124,6 +124,9 @@ async def websocket_endpoint(ws: WebSocket):
                         }))
                         continue
 
+                    if requested_mode == "design":
+                        server.scene.stop_all_actuators()
+
                     server.mode = requested_mode
                     continue
                 elif action == "set_point":
@@ -141,10 +144,10 @@ async def websocket_endpoint(ws: WebSocket):
                         "on",
                     }
 
-                    if (
-                        server.mode != "design"
-                        and property_name not in runtime_properties
-                    ):
+                    if property_name in runtime_properties:
+                        if server.mode == "design":
+                            continue
+                    elif server.mode != "design":
                         continue
 
                     server.scene.apply_property(
@@ -193,12 +196,28 @@ async def websocket_endpoint(ws: WebSocket):
                         if m.get("plc_node", "").strip()
                     ]
                 elif action == "plc_force":
+                    if server.mode == "design":
+                        continue
                     server.scene.force_value(
                         command["tag_name"], command["io_point"], command["value"],
                     )
+                elif action == "load_project":
+                    if server.mode != "design":
+                        continue
+                    from project.serialization import load_project_dict
+                    load_project_dict(server.scene, command.get("data", {}))
+                elif action == "reset_view":
+                    if server.mode != "design":
+                        continue
+                    server.scene.reset_simulation_state()
                 elif action == "plc_validate":
                     await ws.send_text(json.dumps({
                         "plc_validation": _validate_mappings(server),
+                    }))
+                elif action == "save_project":
+                    from project.serialization import scene_to_project_dict
+                    await ws.send_text(json.dumps({
+                        "project_data": scene_to_project_dict(server.scene),
                     }))
                 else:
                     logger.warning("Unknown action %r", action)

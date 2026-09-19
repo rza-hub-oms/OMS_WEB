@@ -16,6 +16,32 @@ let simulationPanY = 0;
 let omsMode = "design";
 let latestPlc = {};
 
+let currentProjectFilename = null;
+
+let projectDirty = false;
+
+function markDirty() {
+  if (projectDirty) return;
+  projectDirty = true;
+  updateDirtyUI();
+}
+
+function markClean() {
+  if (!projectDirty) return;
+  projectDirty = false;
+  updateDirtyUI();
+}
+
+function updateDirtyUI() {
+  document.getElementById("dirty-indicator").classList.toggle("hidden", !projectDirty);
+  document.title = (projectDirty ? "* " : "") + "OMS Web Prototype";
+}
+
+function updateFileNameUI() {
+  document.getElementById("current-file-name").textContent =
+    currentProjectFilename || "Untitled";
+}
+
 const designModeBtn = document.getElementById("design-mode-btn");
 const simulationModeBtn = document.getElementById("simulation-mode-btn");
 const runtimeModeBtn = document.getElementById("runtime-mode-btn");
@@ -66,6 +92,9 @@ function updateModeUI() {
   if (clearButton) {
     clearButton.disabled = !design;
   }
+
+  document.getElementById("open-project-btn").disabled = !design;
+  document.getElementById("reset-view-btn").disabled = !design;
 
   updateRuntimeAlarmBar();
 
@@ -402,7 +431,11 @@ function renderPropertyPanel() {
       const min = f.min !== undefined ? `min="${f.min}"` : "";
       const maxAttr = max !== undefined ? `max="${max}"` : "";
       const step = f.step ? `step="${f.step}"` : `step="any"`;
-      return `<label>${f.label}${f.suffix ? ` (${f.suffix.trim()})` : ""}<input type="number" ${step} ${min} ${maxAttr} data-send="${f.send}" value="${obj[f.key]}"></label>`;
+      const raw = obj[f.key];
+      const val = (f.step && typeof raw === "number")
+        ? Math.round(raw / parseFloat(f.step)) * parseFloat(f.step)
+        : raw;
+      return `<label>${f.label}${f.suffix ? ` (${f.suffix.trim()})` : ""}<input type="number" ${step} ${min} ${maxAttr} data-send="${f.send}" value="${val}"></label>`;
     })
     .join("");
 
@@ -458,13 +491,13 @@ function renderPropertyPanel() {
     if (!selectedTag || !newName || newName === selectedTag) return;
 
     sendSetProperty(selectedTag, "name", newName);
-    // Backend renames are confirmed via the next state broadcast,
-    // where the object will appear under its new tag_name key.
+    markDirty();
     selectedTag = newName;
   });
 
   document.getElementById("property-form").addEventListener("submit", (e) => {
     e.preventDefault();
+    markDirty();
     for (const input of e.target.querySelectorAll("[data-send]")) {
       const value = input.type === "checkbox" ? (input.checked ? 1 : 0) : input.value;
       sendSetProperty(selectedTag, input.dataset.send, value);
@@ -482,6 +515,11 @@ ws.onmessage = (event) => {
   // regular tick broadcast (which always has an "objects" key).
   if (msg.plc_validation !== undefined) {
     showValidationResult(msg.plc_validation);
+    return;
+  }
+
+  if (msg.project_data !== undefined) {
+    saveProjectData(msg.project_data);
     return;
   }
 
@@ -508,19 +546,142 @@ function sendSetPoint(tagName, point, value) {
 }
 
 function sendAddComponent(componentType, x, y) {
+  markDirty();
   ws.send(JSON.stringify({ action: "add_component", component_type: componentType, x, y }));
 }
 
+let currentFileHandle = null;
+const supportsFileSystemAccess = "showSaveFilePicker" in window;
+
+async function pickSaveHandle(suggestedName) {
+  try {
+    return await window.showSaveFilePicker({
+      suggestedName: `${suggestedName}.oms`,
+      types: [{ description: "OMS Project", accept: { "application/json": [".oms"] } }],
+    });
+  } catch (err) {
+    return null; // user cancelled the picker
+  }
+}
+
+async function saveProjectData(data) {
+  if (supportsFileSystemAccess && currentFileHandle) {
+    const writable = await currentFileHandle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+    markClean();
+    return;
+  }
+  downloadProjectBlob(data); // fallback -- may get renamed by the browser
+}
+
+function downloadProjectBlob(data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${currentProjectFilename || "project"}.oms`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  markClean();
+}
+
+function requestProjectSave() {
+  ws.send(JSON.stringify({ action: "save_project" }));
+}
+
+function saveProjectAsClassic() {
+  const name = prompt("Save project as:", currentProjectFilename || "project");
+  if (!name) return;
+  currentProjectFilename = name.replace(/\.oms$/i, "");
+  updateFileNameUI();
+  requestProjectSave();
+}
+
+document.getElementById("save-as-project-btn").addEventListener("click", async () => {
+  if (supportsFileSystemAccess) {
+    const handle = await pickSaveHandle(currentProjectFilename || "project");
+    if (!handle) return;
+    currentFileHandle = handle;
+    currentProjectFilename = handle.name.replace(/\.oms$/i, "");
+    updateFileNameUI();
+    requestProjectSave();
+    return;
+  }
+  saveProjectAsClassic();
+});
+
 document.getElementById("clear-view-btn").addEventListener("click", () => {
   if (!confirm("Clear all components?")) return;
+  markDirty();
   for (const tagName of Object.keys(elements)) {
     ws.send(JSON.stringify({ action: "delete_component", tag_name: tagName }));
   }
 });
 
+document.getElementById("open-project-btn").addEventListener("click", () => {
+  document.getElementById("open-project-input").click();
+});
+
+async function performSave() {
+  if (supportsFileSystemAccess) {
+    if (!currentFileHandle) {
+      currentFileHandle = await pickSaveHandle(currentProjectFilename || "project");
+      if (!currentFileHandle) return;
+      currentProjectFilename = currentFileHandle.name.replace(/\.oms$/i, "");
+      updateFileNameUI();
+    }
+    requestProjectSave();
+    return;
+  }
+  if (!currentProjectFilename) return saveProjectAsClassic();
+  requestProjectSave();
+}
+
+document.getElementById("save-project-btn").addEventListener("click", performSave);
+
+document.getElementById("open-project-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (projectDirty) {
+    const shouldSave = confirm(
+      "You have unsaved changes. OK = save current project first, then open. Cancel = discard changes and open."
+    );
+    if (shouldSave) await performSave();
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try {
+      data = JSON.parse(reader.result);
+    } catch (err) {
+      alert("Not a valid .oms project file.");
+      return;
+    }
+    currentProjectFilename = file.name.replace(/\.oms$/i, "");
+    updateFileNameUI();
+    markClean();
+    deselectAll();
+    ws.send(JSON.stringify({ action: "load_project", data }));
+  };
+  reader.readAsText(file);
+  e.target.value = ""; // allow re-opening the same file later
+});
+
+document.getElementById("reset-view-btn").addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  if (!confirm("Remove all components from the simulation area?")) return;
+  markDirty();
+  ws.send(JSON.stringify({ action: "reset_view" }));
+});
+
 function sendDeleteComponent(tagName) {
   if (!tagName) return;
-
+  markDirty();
   ws.send(JSON.stringify({
     action: "delete_component",
     tag_name: tagName
@@ -679,6 +840,7 @@ function enableComponentDragging(el, tagName) {
     el.style.left = `${newX}px`;
     el.style.top = `${newY}px`;
 
+    markDirty();
     sendSetProperty(tagName, "x", newX);
     sendSetProperty(tagName, "y", newY);
   });
@@ -727,6 +889,7 @@ document.addEventListener("keydown", (e) => {
   }
 
   e.preventDefault();
+  markDirty(); 
 
   const obj = latestState[selectedTag];
   const el = elements[selectedTag];
@@ -1110,12 +1273,6 @@ function renderTowerLight(tagName, tl) {
         const lamp = document.createElement("div");
         lamp.className = "tower-lamp";
         lamp.dataset.color = color;
-        lamp.addEventListener("pointerdown", (e) => {
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          const isLit = !!latestState[tagName]?.[color];
-          sendSetPoint(tagName, color, isLit ? 0 : 1);
-        });
         container.appendChild(lamp);
       }
 
@@ -1648,6 +1805,7 @@ document.getElementById("mapping-rescan-btn").addEventListener("click", () => {
 });
 
 function applyAllMappings() {
+  markDirty();
   const mappings = [];
   for (const [key, cells] of Object.entries(mappingCells)) {
     const [tag, point] = key.split("|");
@@ -1740,3 +1898,9 @@ canvasViewport.addEventListener("pointercancel", stopSimulationPanning);
 canvasViewport.style.cursor = "grab";
 
 applySimulationTransform();
+
+window.addEventListener("beforeunload", (e) => {
+  if (!projectDirty) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
