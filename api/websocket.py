@@ -22,6 +22,9 @@ logger = logging.getLogger("oms_web")
 
 router = APIRouter()
 
+# The three OMS modes, in the order they appear in the mode bar.
+VALID_MODES = ("design", "simulation", "runtime")
+
 
 class ConnectionManager:
     """Tracks connected browser clients and broadcasts JSON state to all
@@ -104,19 +107,55 @@ async def websocket_endpoint(ws: WebSocket):
                 command = json.loads(raw)
                 action = command.get("action", "set_point")  # default keeps old messages working
 
-                if action == "set_point":
+                if action == "set_mode":
+                    requested_mode = command.get("mode")
+
+                    if requested_mode not in VALID_MODES:
+                        continue
+
+                    if requested_mode == "runtime" and not (
+                        server.plc_sync is not None and server.plc_sync.is_connected
+                    ):
+                        # RUNTIME means "connected to the actual PLC" --
+                        # refuse to enter it without a live connection
+                        # instead of silently showing frozen/fake values.
+                        await ws.send_text(json.dumps({
+                            "mode_error": "Connect to a PLC before switching to Runtime.",
+                        }))
+                        continue
+
+                    server.mode = requested_mode
+                    continue
+                elif action == "set_point":
                     server.scene.apply_command(
                         command["tag_name"],
                         command["point"],
                         command["value"],
                     )
                 elif action == "set_property":
+                    tag_name = command["tag_name"]
+                    property_name = command["property"]
+
+                    runtime_properties = {
+                        "pressed",
+                        "on",
+                    }
+
+                    if (
+                        server.mode != "design"
+                        and property_name not in runtime_properties
+                    ):
+                        continue
+
                     server.scene.apply_property(
-                        command["tag_name"],
-                        command["property"],
+                        tag_name,
+                        property_name,
                         command["value"],
                     )
                 elif action == "add_component":
+                    if server.mode != "design":
+                        continue
+
                     obj = server.scene.create_component(
                         command["component_type"],
                         command["x"],
@@ -127,6 +166,8 @@ async def websocket_endpoint(ws: WebSocket):
                             "Unknown component_type %r", command["component_type"]
                         )
                 elif action == "delete_component":
+                    if server.mode != "design":
+                        continue
                     tag_name = command["tag_name"]
 
                     if not server.scene.remove(tag_name):
@@ -216,6 +257,12 @@ def _plc_disconnect(server) -> None:
         server.plc_sync.close_connection()
     server.plc_sync = None
 
+    # RUNTIME requires a live PLC by definition -- losing the connection
+    # drops back to DESIGN rather than leaving the UI stuck showing a
+    # "live" screen that isn't live anymore.
+    if server.mode == "runtime":
+        server.mode = "design"
+
 
 def _validate_mappings(server) -> list:
     """Same check as the original's "Validate Mappings" button: every
@@ -258,8 +305,11 @@ async def tick_loop(scene) -> None:
 
     interval_sec = TICK_MS / 1000.0
     while True:
-        scene.tick(TICK_MS)
+        # DESIGN is frozen (editing only); SIMULATION and RUNTIME both
+        # animate -- they differ in where commands come from, not
+        # whether the scene moves.
+        scene.tick(TICK_MS, simulate=(server.mode != "design"))
         if server.plc_sync is not None:
             server.plc_sync.poll()
-        await manager.broadcast({"objects": scene.to_dict(), "plc": _plc_status()})
+        await manager.broadcast({"objects": scene.to_dict(), "plc": _plc_status(), "mode": server.mode,})
         await asyncio.sleep(interval_sec)

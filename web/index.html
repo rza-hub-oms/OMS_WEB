@@ -57,6 +57,42 @@
     </div>
   </section>
 
+  <div id="mode-bar">
+    <div class="mode-label">MODE</div>
+
+    <button
+      type="button"
+      id="design-mode-btn"
+      class="mode-btn active"
+    >
+      DESIGN
+    </button>
+
+    <button
+      type="button"
+      id="simulation-mode-btn"
+      class="mode-btn"
+    >
+      SIMULATION
+    </button>
+
+    <button
+      type="button"
+      id="runtime-mode-btn"
+      class="mode-btn"
+    >
+      RUNTIME
+    </button>
+
+    <div id="mode-description">
+      Engineering / configuration mode
+    </div>
+  </div>
+
+  <div id="runtime-alarm-bar" class="hidden">
+    ⚠ RUNTIME — PLC connection lost. Values shown are the last known state.
+  </div>
+
   <div id="app">
     <aside id="dock">
       <div class="panel-title">COMPONENTS</div>

@@ -13,11 +13,98 @@ let simulationZoom = 1;
 let simulationPanX = 0;
 let simulationPanY = 0;
 
+let omsMode = "design";
+let latestPlc = {};
+
+const designModeBtn = document.getElementById("design-mode-btn");
+const simulationModeBtn = document.getElementById("simulation-mode-btn");
+const runtimeModeBtn = document.getElementById("runtime-mode-btn");
+const modeDescription = document.getElementById("mode-description");
+const runtimeAlarmBar = document.getElementById("runtime-alarm-bar");
+
 let panning = false;
 let panStartX = 0;
 let panStartY = 0;
 let panOriginX = 0;
 let panOriginY = 0;
+
+function isDesignMode() {
+  return omsMode === "design";
+}
+
+function isSimulationMode() {
+  return omsMode === "simulation";
+}
+
+function isRuntimeMode() {
+  return omsMode === "runtime";
+}
+
+const MODE_DESCRIPTIONS = {
+  design: "Engineering / configuration mode — build the machine.",
+  simulation: "Testing the machine without PLC hardware.",
+  runtime: "Connected to the PLC — live operation.",
+};
+
+function updateModeUI() {
+  const design = isDesignMode();
+
+  designModeBtn.classList.toggle("active", omsMode === "design");
+  simulationModeBtn?.classList.toggle("active", omsMode === "simulation");
+  runtimeModeBtn.classList.toggle("active", omsMode === "runtime");
+
+  modeDescription.textContent = MODE_DESCRIPTIONS[omsMode] || "";
+
+  document.body.classList.remove("mode-design", "mode-simulation", "mode-runtime");
+  document.body.classList.add(`mode-${omsMode}`);
+
+  // Components palette + Clear View are DESIGN-only operations.
+  palette.style.pointerEvents = design ? "auto" : "none";
+  palette.style.opacity = design ? "1" : "0.45";
+
+  const clearButton = document.getElementById("clear-view-btn");
+  if (clearButton) {
+    clearButton.disabled = !design;
+  }
+
+  updateRuntimeAlarmBar();
+
+  // Re-render inspector because properties become read-only
+  // outside of Design mode.
+  renderPropertyPanel();
+}
+
+function updateRuntimeAlarmBar() {
+  if (!runtimeAlarmBar) return;
+  const lostComms = isRuntimeMode() && (!latestPlc.connected || !latestPlc.comms_healthy);
+  runtimeAlarmBar.classList.toggle("hidden", !lostComms);
+}
+
+designModeBtn.addEventListener("click", () => {
+  ws.send(JSON.stringify({
+    action: "set_mode",
+    mode: "design",
+  }));
+});
+
+simulationModeBtn?.addEventListener("click", () => {
+  ws.send(JSON.stringify({
+    action: "set_mode",
+    mode: "simulation",
+  }));
+});
+
+runtimeModeBtn.addEventListener("click", () => {
+  if (!latestPlc.connected) {
+    alert("Connect to a PLC before switching to Runtime.");
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    action: "set_mode",
+    mode: "runtime",
+  }));
+});
 
 canvasViewport.addEventListener(
   "wheel",
@@ -82,6 +169,14 @@ const elements = {};
 
 const propertyBody = document.getElementById("property-body");
 let selectedTag = null;
+
+// Runs the initial mode-bar/palette state now that latestState,
+// propertyBody and selectedTag (used by renderPropertyPanel(), which
+// updateModeUI() calls) are all declared -- calling this any earlier
+// throws "Cannot access 'selectedTag' before initialization" and
+// aborts the rest of this script, including the drag-and-drop
+// listeners further down.
+updateModeUI();
 
 // Editable design-time fields per component type, mirroring the
 // original desktop app's PropertiesPanel field set/order (Name, X, Y,
@@ -318,12 +413,34 @@ function renderPropertyPanel() {
     <div id="status-block">${statusHtml}</div>
     <form id="property-form">
       ${fieldsHtml}
-      <button type="submit" class="apply">Apply</button>
-      <button type="button" class="delete" id="delete-component">Delete Component</button>
+
+      ${
+        isDesignMode()
+          ? `
+            <button type="submit" class="apply">Apply</button>
+            <button type="button" class="delete" id="delete-component">
+              Delete Component
+            </button>
+          `
+          : `
+            <div class="runtime-property-note">
+              ${isRuntimeMode() ? "Runtime" : "Simulation"} mode — properties are read-only.
+            </div>
+          `
+      }
     </form>
   `;
 
-  document.getElementById("delete-component").addEventListener("click", () => {
+  if (!isDesignMode()) {
+    propertyBody
+      .querySelectorAll("#property-form input, #property-form select")
+      .forEach((element) => {
+        element.disabled = true;
+      });
+  }
+
+  document.getElementById("delete-component")?.addEventListener("click", () => {
+    if (!isDesignMode()) return;
     if (!selectedTag) return;
 
     const tag = selectedTag;
@@ -358,8 +475,6 @@ function renderPropertyPanel() {
 const ws = new WebSocket(`ws://${location.host}/ws`);
 
 
-let latestPlc = {};
-
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
 
@@ -370,11 +485,22 @@ ws.onmessage = (event) => {
     return;
   }
 
+  if (msg.mode_error) {
+    alert(msg.mode_error);
+    return;
+  }
+
+  if (msg.mode && msg.mode !== omsMode) {
+    omsMode = msg.mode;
+    updateModeUI();
+  }
+
   latestState = msg.objects || {};
   latestPlc = msg.plc || {};
   render(latestState);
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
+  updateRuntimeAlarmBar();
 };
 
 function sendSetPoint(tagName, point, value) {
@@ -508,6 +634,10 @@ function enableComponentDragging(el, tagName) {
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
 
+    if (!isDesignMode()) {
+      return;
+    }
+
     dragging = true;
     moved = false;
 
@@ -577,6 +707,7 @@ function enableComponentDragging(el, tagName) {
 // Nudge the selected component with the arrow keys.
 // Hold Shift for a bigger step.
 document.addEventListener("keydown", (e) => {
+  if (!isDesignMode()) return;
   if (!selectedTag) return;
 
   const active = document.activeElement;
@@ -652,6 +783,7 @@ function renderConveyor(tagName, c) {
     },
     () => {
       selectComponent(tagName);
+      if (isDesignMode()) return;
       sendSetPoint(tagName, "running", latestState[tagName]?.running ? 0 : 1);
     }
   );
@@ -714,6 +846,7 @@ function renderCylinder(tagName, cyl) {
     },
     () => {
       selectComponent(tagName);
+      if (isDesignMode()) return;
       sendSetPoint(tagName, "extend", latestState[tagName]?.extended ? 0 : 1);
     }
   );
@@ -770,6 +903,7 @@ function renderMotor(tagName, c) {
     },
     () => {
       selectComponent(tagName);
+      if (isDesignMode()) return;
       sendSetPoint(
         tagName,
         "running",
@@ -1077,6 +1211,8 @@ canvasViewport.addEventListener("drop", (e) => {
   e.preventDefault();
   canvasViewport.classList.remove("drag-over");
 
+  if (!isDesignMode()) return;
+
   const componentType = e.dataTransfer.getData("text/plain");
   if (!componentType) return;
 
@@ -1178,6 +1314,13 @@ function renderPlcStatus(plc) {
 
   pauseBtn.disabled = !plc.connected;
   pauseBtn.textContent = plc.paused ? "Resume" : "Pause";
+
+  // Runtime requires a live PLC -- reflect that on the mode button
+  // itself, not just as an alert when clicked.
+  runtimeModeBtn.classList.toggle("unavailable", !plc.connected);
+  runtimeModeBtn.title = plc.connected
+    ? ""
+    : "Connect to a PLC before switching to Runtime.";
 
   document.getElementById("plc-last-error").textContent = plc.last_error || "";
 

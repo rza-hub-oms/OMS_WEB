@@ -1137,3 +1137,98 @@ button:hover { background: #25445c; border-color: #3488c7; }
   position: relative;
   top: 3px;
 }
+
+/* ---------- Design / Runtime mode ---------- */
+
+#mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  margin-bottom: 10px;
+  padding: 6px 10px;
+
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+
+  background: var(--panel);
+}
+
+.mode-label {
+  margin-right: 8px;
+
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+
+  color: var(--muted);
+}
+
+.mode-btn {
+  min-width: 90px;
+  padding: 7px 14px;
+
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+
+  background: var(--panel2);
+  color: var(--text);
+
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.mode-btn:hover {
+  background: #1b2a38;
+}
+
+.mode-btn.active {
+  background: #173e57;
+  border-color: #3187b8;
+  color: #fff;
+}
+
+/* SIMULATION's active color is distinct from DESIGN/RUNTIME so the mode
+   bar reads at a glance -- amber, the conventional "test/not-live" cue. */
+#simulation-mode-btn.active {
+  background: #5a4315;
+  border-color: #c99a2e;
+  color: #fff;
+}
+
+/* RUNTIME's active color is distinct too -- green, "live" system cue. */
+#runtime-mode-btn.active {
+  background: #17572a;
+  border-color: #31b855;
+  color: #fff;
+}
+
+.mode-btn.unavailable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#mode-description {
+  margin-left: 10px;
+
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#runtime-alarm-bar {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+
+  border: 1px solid #c99a2e;
+  border-radius: 4px;
+
+  background: #5a4315;
+  color: #fff;
+
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#runtime-alarm-bar.hidden {
+  display: none;
+}

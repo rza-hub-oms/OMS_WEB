@@ -86,10 +86,37 @@ class Scene:
             for obj in self.objects.values()
         )
 
-    def tick(self, dt_ms: float = TICK_MS) -> None:
+    def tick(self, dt_ms: float = TICK_MS, simulate: bool = True) -> None:
         """Advance every component by one simulation step, then update
-        sensor detection against the now-current box positions."""
+        sensor detection against the now-current box positions.
+
+        simulate=False freezes the scene (used for DESIGN mode, where
+        components must sit still while being placed/edited). SIMULATION
+        and RUNTIME both pass simulate=True -- the difference between
+        those two modes is *where commands come from* (operator clicks
+        vs. a live PLC via plc_sync), not whether physics runs."""
+        if not simulate:
+            return
+
         if self.is_emergency_stopped():
+            # Everything else freezes, but a single-valve (single-
+            # solenoid, spring-return) cylinder loses its holding
+            # signal on E-Stop and springs back to retracted. Dual-
+            # valve cylinders need an active signal either way, so
+            # they just hold position like everything else.
+            for obj in self.objects.values():
+                if (
+                    isinstance(obj, CylinderBehavior)
+                    and obj.valve_type == CylinderBehavior.VALVE_SINGLE
+                ):
+                    obj.set_extended(False)
+                    obj.advance_animation(dt_ms)
+                elif isinstance(obj, (ConveyorBehavior, MotorBehavior)):
+                    # E-Stop cuts drive power immediately -- without
+                    # this, `running` stays True and the belt/status
+                    # CSS keeps animating client-side even though the
+                    # backend is frozen.
+                    obj.set_running(False)
             return
 
         for obj in self.objects.values():

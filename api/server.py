@@ -30,6 +30,15 @@ plc_sync = None
 selected_plc_backend = None
 _last_connect_error = None
 
+# Current OMS operating mode: "design", "simulation", or "runtime".
+#   design     -- build the machine; scene is frozen (no physics tick).
+#   simulation -- test the machine without PLC hardware; physics runs,
+#                 operator can drive permitted controls.
+#   runtime    -- connected to a real PLC; physics runs but is driven by
+#                 live PLC values via plc_sync instead of local buttons.
+# This prototype currently has one shared Scene/browser session.
+mode = "design"
+
 # Seeded via create_component() (not scene.add() directly) so the
 # auto-naming counter used for dock-dragged components stays in sync --
 # otherwise the first dragged conveyor would collide with "Conveyor_1".
