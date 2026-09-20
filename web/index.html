@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>OMS Web Prototype</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <h1>OMS Web Prototype</h1>
@@ -133,7 +133,11 @@
       </div>
 
       <div id="plc-tab" class="tab-panel" data-panel="plc">
-        <p id="node-hint" class="hint"></p>
+        <div class="mapping-actions">
+          <button id="mapping-rescan-btn" title="Rescan Scene">🔄</button>
+          <button id="mapping-validate-btn" title="Validate Mappings">✓</button>
+          <button id="mapping-import-db-btn" title="Import DB Tags...">📥</button>
+        </div>
 
         <input id="mapping-filter" type="text" placeholder="Filter by object, I/O point, or node ID...">
         <div class="mapping-group-controls">
@@ -152,25 +156,13 @@
         </div>
 
         <div id="mapping-table-wrap">
-          <table id="mapping-table">
-            <thead>
-              <tr>
-                <th>Object</th>
-                <th>I/O Point</th>
-                <th>Direction</th>
-                <th>PLC Node ID</th>
-                <th>Live Value</th>
-                <th>Force Value</th>
-              </tr>
-            </thead>
-            <tbody id="mapping-tbody"></tbody>
-          </table>
-        </div>
-
-        <div class="mapping-actions">
-          <button id="mapping-rescan-btn">Rescan Scene</button>
-          <button id="mapping-validate-btn">Validate Mappings</button>
-          <button id="mapping-import-s7-btn">Import S7 DB...</button>
+          <div class="mapping-table-head" aria-hidden="true">
+            <span>Object / I/O</span>
+            <span>PLC address / node</span>
+            <span>Live</span>
+            <span>Force</span>
+          </div>
+          <div id="mapping-tbody" class="mapping-card-list"></div>
         </div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
@@ -179,24 +171,66 @@
     </aside>
   </div>
 
-  <div id="s7-import-modal" class="modal-overlay hidden">
+  <div id="db-import-modal" class="modal-overlay hidden">
     <div class="modal-box">
       <div class="modal-header">
-        <span>Import S7 Data Block</span>
-        <button type="button" class="modal-close" id="s7-import-close">✕</button>
+        <span>Import DB Tags (TIA Portal source)</span>
+        <button type="button" class="modal-close" id="db-import-close">✕</button>
       </div>
       <div class="modal-body">
         <p class="hint">
-          In TIA Portal: right-click the DB → <b>Generate source</b>, open the
-          resulting .db file in a text editor, and paste its contents below.
-          The DB needs <b>Optimized block access</b> turned off, or there's no
-          fixed byte layout to compute addresses from.
+          In TIA Portal, either: right-click a DB → <b>Generate source</b>, open
+          the resulting .db file in a text editor and paste its contents below;
+          or right-click a PLC tag table → <b>Export</b> to get an .xlsx file.
+          Works fully offline -- no PLC connection needed either way.
         </p>
-        <label class="modal-field">DB number
-          <input id="s7-import-dbnum" type="number" min="1" placeholder="e.g. 1 (auto-filled if the header names it DB1, DB2, ...)">
+        <label class="modal-field">Source
+          <select id="db-import-source">
+            <option value="text">DB source text (.db / .awl)</option>
+            <option value="xlsx">PLC tag table (.xlsx export)</option>
+          </select>
         </label>
-        <textarea id="s7-import-text" rows="10" placeholder="Paste the generated DB source text here..."></textarea>
+
+        <label class="modal-field">Target
+          <select id="db-import-target">
+            <option value="s7">S7 addresses (DB1.DBX0.0, ...)</option>
+            <option value="opcua">OPC UA Node IDs (ns=3;s=DB.Tag)</option>
+          </select>
+        </label>
+
+        <div id="db-import-s7-fields" class="modal-field-group">
+          <label class="modal-field">DB number
+            <input id="s7-import-dbnum" type="number" min="1" placeholder="e.g. 1 (auto-filled if the header names it DB1, DB2, ...)">
+          </label>
+          <p class="hint">Needs <b>Optimized block access</b> turned off in TIA, or there's no fixed byte layout to compute.</p>
+        </div>
+
+        <div id="db-import-opcua-fields" class="modal-field-group hidden">
+          <label class="modal-field">Namespace index
+            <input id="opcua-import-namespace" type="number" min="0" value="3">
+          </label>
+          <label class="modal-field">DB name override (optional)
+            <input id="opcua-import-dbname" type="text" placeholder="Defaults to the DATA_BLOCK header name">
+          </label>
+          <p class="hint">
+            The namespace index and exact naming are set by the PLC's own OPC UA
+            server config, not by this source text -- treat the result as a
+            starting point and confirm at least one address (e.g. via a live
+            Browse) before trusting the rest.
+          </p>
+        </div>
+
+        <div id="db-import-text-fields">
+          <textarea id="s7-import-text" rows="10" placeholder="Paste the generated DB source text here..."></textarea>
+        </div>
+
+        <div id="db-import-xlsx-fields" class="hidden">
+          <p id="xlsx-import-filename" class="hint">No file chosen.</p>
+        </div>
+
         <div class="modal-actions">
+          <button type="button" id="s7-import-browse-btn">Choose File</button>
+          <input type="file" id="s7-import-file-input" accept=".db,.awl,.txt" style="display:none;">
           <button type="button" id="s7-import-parse-btn" class="apply">Parse</button>
         </div>
         <p id="s7-import-error" class="plc-error"></p>
@@ -209,7 +243,7 @@
             </table>
           </div>
           <div class="modal-actions">
-            <button type="button" id="s7-import-use-btn" class="apply">Use These Tags</button>
+            <button type="button" id="s7-import-use-btn" class="apply">Apply Mappings</button>
           </div>
         </div>
       </div>
@@ -231,6 +265,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

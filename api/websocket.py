@@ -5,6 +5,7 @@ broadcasts Scene state to every connected browser.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -126,7 +127,8 @@ async def websocket_endpoint(ws: WebSocket):
         {"action": "plc_set_mapping", "mappings": [{"object_tag", "io_point", "plc_node"}, ...]}
         {"action": "plc_force", "tag_name": "...", "io_point": "...", "value": "..."}
         {"action": "plc_validate"}
-        {"action": "plc_import_s7_db", "text": "<pasted TIA 'Generate source' .db text>", "db_number": 1}
+        {"action": "plc_import_db_tags", "target": "s7", "text": "<pasted TIA 'Generate source' .db text>", "db_number": 1}
+        {"action": "plc_import_db_tags", "target": "opcua", "text": "<same pasted text>", "namespace": 3, "db_name": null}
         {"action": "plc_browse_opcua", "node_id": "ns=3;s=..." or omitted for the root}
     Outgoing messages (pushed by the tick loop, not sent from here):
         {"objects": {"Conveyor_1": {...}, ...}, "plc": {...}}
@@ -235,18 +237,51 @@ async def websocket_endpoint(ws: WebSocket):
                     server.scene.force_value(
                         command["tag_name"], command["io_point"], command["value"],
                     )
-                elif action == "plc_import_s7_db":
-                    from plc.s7_db_import import parse_db_source, S7ImportError
+                elif action == "plc_import_db_tags":
+                    from plc.s7_db_import import (
+                        parse_db_source, generate_opcua_node_ids, S7ImportError,
+                    )
+                    from plc.tag_table_import import (
+                        parse_tag_table_xlsx,
+                        generate_opcua_node_ids_from_tag_table,
+                        TagTableImportError,
+                    )
+                    target = command.get("target", "s7")
+                    source = command.get("source", "text")
                     try:
-                        tags, warnings = parse_db_source(
-                            command.get("text", ""), command.get("db_number"),
-                        )
+                        if source == "xlsx":
+                            try:
+                                file_bytes = base64.b64decode(command.get("xlsx_base64", ""))
+                            except Exception:
+                                raise TagTableImportError("Couldn't decode the uploaded .xlsx file.")
+
+                            if target == "opcua":
+                                tags, warnings = generate_opcua_node_ids_from_tag_table(
+                                    file_bytes,
+                                    namespace=command.get("namespace") or 3,
+                                    path_prefix=command.get("db_name") or None,
+                                )
+                            else:
+                                tags, warnings = parse_tag_table_xlsx(file_bytes)
+                        else:
+                            text = command.get("text", "")
+                            if target == "opcua":
+                                tags, warnings = generate_opcua_node_ids(
+                                    text,
+                                    namespace=command.get("namespace") or 3,
+                                    db_name=command.get("db_name") or None,
+                                )
+                            else:
+                                tags, warnings = parse_db_source(
+                                    text, command.get("db_number"),
+                                )
+
                         await ws.send_text(json.dumps({
-                            "s7_import_result": {"tags": tags, "warnings": warnings},
+                            "db_import_result": {"target": target, "tags": tags, "warnings": warnings},
                         }))
-                    except S7ImportError as exc:
+                    except (S7ImportError, TagTableImportError) as exc:
                         await ws.send_text(json.dumps({
-                            "s7_import_result": {"error": str(exc)},
+                            "db_import_result": {"target": target, "error": str(exc)},
                         }))
                 elif action == "plc_browse_opcua":
                     await _plc_browse_opcua(server, ws, command.get("node_id"))

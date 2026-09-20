@@ -3,3 +3,4 @@ uvicorn[standard]
 asyncua
 python-snap7
 PyYAML
+openpyxl

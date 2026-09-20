@@ -571,8 +571,8 @@ ws.onmessage = (event) => {
     return;
   }
 
-  if (msg.s7_import_result !== undefined) {
-    handleS7ImportResult(msg.s7_import_result);
+  if (msg.db_import_result !== undefined) {
+    handleDbImportResult(msg.db_import_result);
     return;
   }
 
@@ -1657,6 +1657,7 @@ function renderPlcStatus(plc) {
 
 function updateNodeHint(plc) {
   const el = document.getElementById("node-hint");
+  if (!el) return;
   const hints = plc.address_format_hints || {};
 
   if (plc.connected) {
@@ -1716,15 +1717,12 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
 
     // ---------- Object group header ----------
     if (grouping && row.tag !== lastTag) {
-      const headerRow = document.createElement("tr");
+      const headerRow = document.createElement("div");
       headerRow.className = "mapping-group-header";
       headerRow.dataset.groupTag = row.tag;
 
       headerRow.innerHTML = `
-        <td colspan="6">
-          <span class="group-arrow">▼</span>
-          ${row.tag}
-        </td>
+        <span class="group-arrow">▼</span><span class="group-header-label">${row.tag}</span>
       `;
 
       headerRow.addEventListener("click", () => {
@@ -1749,32 +1747,31 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
       lastTag = row.tag;
     }
 
-    // ---------- Mapping row ----------
+    // ---------- Mapping card ----------
     const key = `${row.tag}|${row.point}`;
     const nodeValue = nodeByKey[key] || "";
     const direction = row.isPlcToOms ? "PLC -> OMS" : "OMS -> PLC";
 
-    const tr = document.createElement("tr");
+    const tr = document.createElement("div");
 
+    tr.className = "mapping-card";
     tr.dataset.groupTag = row.tag;
     tr.classList.toggle("unmapped-row", !nodeValue);
 
     tr.innerHTML = `
-      <td>${row.tag}</td>
-      <td>${row.point}</td>
-      <td class="center">${direction}</td>
-      <td>
-        <div class="node-input-wrap">
-          <input type="text" class="node-input">
-          <button type="button" class="browse-node-btn" title="Browse available PLC tags">⌕</button>
-        </div>
-      </td>
-      <td class="center live-value">—</td>
-      <td>
-        ${row.isPlcToOms
-          ? '<span class="force-cell"><input type="text" class="force-input" placeholder="value"></span>'
-          : ""}
-      </td>
+      <div class="mapping-card-top" title="${row.tag} / ${row.point}">
+        <span class="mapping-card-object">${row.tag}</span>
+        <span class="mapping-card-point">${row.point}</span>
+        <span class="mapping-card-direction">${direction}</span>
+      </div>
+      <div class="node-input-wrap">
+        <input type="text" class="node-input">
+        <button type="button" class="browse-node-btn" title="Browse available PLC tags">⌕</button>
+      </div>
+      <span class="mapping-card-live" title="Live value"><span class="live-value">—</span></span>
+      ${row.isPlcToOms
+        ? '<span class="force-cell"><input type="text" class="force-input" placeholder="value"></span>'
+        : '<span class="force-cell force-empty">—</span>'}
     `;
 
     const nodeInput = tr.querySelector(".node-input");
@@ -1928,9 +1925,8 @@ document.getElementById("mapping-expand-all").addEventListener("click", () => {
   document.querySelectorAll("#mapping-tbody .mapping-group-header").forEach((headerRow) => {
     headerRow.classList.remove("collapsed");
 
-    const td = headerRow.querySelector("td");
-    const tag = headerRow.dataset.groupTag;
-    td.textContent = `▼ ${tag}`;
+    const arrow = headerRow.querySelector(".group-arrow");
+    arrow.textContent = "▼";
 
     let sib = headerRow.nextElementSibling;
     while (sib && !sib.classList.contains("mapping-group-header")) {
@@ -1946,9 +1942,8 @@ document.getElementById("mapping-collapse-all").addEventListener("click", () => 
   document.querySelectorAll("#mapping-tbody .mapping-group-header").forEach((headerRow) => {
     headerRow.classList.add("collapsed");
 
-    const td = headerRow.querySelector("td");
-    const tag = headerRow.dataset.groupTag;
-    td.textContent = `▶ ${tag}`;
+    const arrow = headerRow.querySelector(".group-arrow");
+    arrow.textContent = "▶";
 
     let sib = headerRow.nextElementSibling;
     while (sib && !sib.classList.contains("mapping-group-header")) {
@@ -1995,37 +1990,167 @@ function showValidationResult(problems) {
   alert(`${problems.length} mapping error(s) found:\n\n${lines.join("\n\n")}`);
 }
 
-// ---------- S7 DB import (TIA Portal "Generate source" paste-in) ----------
+// ---------- DB tag import (TIA Portal "Generate source" paste-in) ----------
 //
-// Parsing/offset math happens server-side (plc/s7_db_import.py) --
-// the result is cached here client-side only (not persisted to the
-// project file) so the tag picker below has something to offer for
-// the s7 backend.
-let importedS7Tags = [];
+// Parsing/address-generation happens server-side (plc/s7_db_import.py)
+// -- the result is cached here client-side only (not persisted to the
+// project file) so the tag picker below has something to offer fully
+// offline, for either backend.
+let importedTags = { s7: [], opcua: [] };
 
-const s7ImportModal = document.getElementById("s7-import-modal");
+const dbImportModal = document.getElementById("db-import-modal");
 
-document.getElementById("mapping-import-s7-btn").addEventListener("click", () => {
+document.getElementById("mapping-import-db-btn").addEventListener("click", () => {
   document.getElementById("s7-import-error").textContent = "";
   document.getElementById("s7-import-preview-wrap").classList.add("hidden");
-  s7ImportModal.classList.remove("hidden");
+  document.getElementById("db-import-source").value = "text";
+  pendingXlsxBase64 = null;
+  document.getElementById("xlsx-import-filename").textContent = "No file chosen.";
+  // Default the target to whatever backend is currently selected, so
+  // the common case (matches the PLC Connection panel) needs no extra click.
+  const backend = document.getElementById("plc-backend-select").value;
+  document.getElementById("db-import-target").value =
+    (backend === "asyncua" || backend === "opcua") ? "opcua" : "s7";
+  updateDbImportFieldsVisibility();
+  dbImportModal.classList.remove("hidden");
 });
 
-document.getElementById("s7-import-close").addEventListener("click", () => {
-  s7ImportModal.classList.add("hidden");
+document.getElementById("db-import-close").addEventListener("click", () => {
+  dbImportModal.classList.add("hidden");
 });
+
+document.getElementById("db-import-target").addEventListener("change", updateDbImportFieldsVisibility);
+document.getElementById("db-import-source").addEventListener("change", updateDbImportFieldsVisibility);
+
+// Dropping a .db source file directly onto the textarea reads its text
+// in-place, instead of letting the browser's default action navigate
+// away to open the file.
+const s7ImportTextarea = document.getElementById("s7-import-text");
+
+s7ImportTextarea.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+});
+
+s7ImportTextarea.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    s7ImportTextarea.value = reader.result;
+  };
+  reader.onerror = () => {
+    alert("Could not read the dropped file.");
+  };
+  reader.readAsText(file);
+});
+
+// "Choose File" opens a native file picker. What it reads into
+// depends on the Source dropdown: DB source text goes straight into
+// the textarea; an .xlsx tag table is read as binary and base64-
+// encoded for the backend (openpyxl) to parse -- see pendingXlsxBase64.
+const s7ImportFileInput = document.getElementById("s7-import-file-input");
+let pendingXlsxBase64 = null;
+
+document.getElementById("s7-import-browse-btn").addEventListener("click", () => {
+  s7ImportFileInput.click();
+});
+
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+s7ImportFileInput.addEventListener("change", () => {
+  const file = s7ImportFileInput.files && s7ImportFileInput.files[0];
+  if (!file) return;
+
+  const isXlsx = document.getElementById("db-import-source").value === "xlsx";
+  const reader = new FileReader();
+
+  if (isXlsx) {
+    reader.onload = () => {
+      pendingXlsxBase64 = arrayBufferToBase64(reader.result);
+      document.getElementById("xlsx-import-filename").textContent = `Selected: ${file.name}`;
+    };
+    reader.onerror = () => {
+      alert("Could not read the selected file.");
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    reader.onload = () => {
+      s7ImportTextarea.value = reader.result;
+    };
+    reader.onerror = () => {
+      alert("Could not read the selected file.");
+    };
+    reader.readAsText(file);
+  }
+
+  s7ImportFileInput.value = ""; // allow re-selecting the same file later
+});
+
+function updateDbImportFieldsVisibility() {
+  const target = document.getElementById("db-import-target").value;
+  const source = document.getElementById("db-import-source").value;
+  const isXlsx = source === "xlsx";
+
+  // DB number only means anything for the DB-source-text path -- a
+  // tag table's Logical Address is already a complete I/Q/M address.
+  document.getElementById("db-import-s7-fields").classList.toggle("hidden", target !== "s7" || isXlsx);
+  document.getElementById("db-import-opcua-fields").classList.toggle("hidden", target !== "opcua");
+
+  document.getElementById("db-import-text-fields").classList.toggle("hidden", isXlsx);
+  document.getElementById("db-import-xlsx-fields").classList.toggle("hidden", !isXlsx);
+
+  s7ImportFileInput.accept = isXlsx ? ".xlsx" : ".db,.awl,.txt";
+}
 
 document.getElementById("s7-import-parse-btn").addEventListener("click", () => {
+  const target = document.getElementById("db-import-target").value;
+  const source = document.getElementById("db-import-source").value;
+
+  if (source === "xlsx") {
+    if (!pendingXlsxBase64) {
+      document.getElementById("s7-import-error").textContent = "Choose an .xlsx file first.";
+      document.getElementById("s7-import-preview-wrap").classList.add("hidden");
+      return;
+    }
+    const payload = { action: "plc_import_db_tags", target, source: "xlsx", xlsx_base64: pendingXlsxBase64 };
+    if (target === "opcua") {
+      const ns = document.getElementById("opcua-import-namespace").value.trim();
+      const dbName = document.getElementById("opcua-import-dbname").value.trim();
+      if (ns) payload.namespace = parseInt(ns, 10);
+      if (dbName) payload.db_name = dbName;
+    }
+    ws.send(JSON.stringify(payload));
+    return;
+  }
+
   const text = document.getElementById("s7-import-text").value;
-  const dbNumRaw = document.getElementById("s7-import-dbnum").value.trim();
-  const payload = { action: "plc_import_s7_db", text };
-  if (dbNumRaw) payload.db_number = parseInt(dbNumRaw, 10);
+  const payload = { action: "plc_import_db_tags", target, source: "text", text };
+
+  if (target === "opcua") {
+    const ns = document.getElementById("opcua-import-namespace").value.trim();
+    const dbName = document.getElementById("opcua-import-dbname").value.trim();
+    if (ns) payload.namespace = parseInt(ns, 10);
+    if (dbName) payload.db_name = dbName;
+  } else {
+    const dbNumRaw = document.getElementById("s7-import-dbnum").value.trim();
+    if (dbNumRaw) payload.db_number = parseInt(dbNumRaw, 10);
+  }
+
   ws.send(JSON.stringify(payload));
 });
 
-let _pendingS7ImportTags = [];
+let _pendingImportTags = [];
+let _pendingImportTarget = "s7";
 
-function handleS7ImportResult(result) {
+function handleDbImportResult(result) {
   const errorEl = document.getElementById("s7-import-error");
   const previewWrap = document.getElementById("s7-import-preview-wrap");
 
@@ -2036,35 +2161,57 @@ function handleS7ImportResult(result) {
   }
 
   errorEl.textContent = (result.warnings || []).join(" ");
-  _pendingS7ImportTags = result.tags || [];
+  _pendingImportTags = result.tags || [];
+  _pendingImportTarget = result.target || "s7";
 
   document.getElementById("s7-import-summary").textContent =
-    `${_pendingS7ImportTags.length} addressable tag(s) found.`;
+    `${_pendingImportTags.length} addressable tag(s) found.`;
 
   const tbody = document.getElementById("s7-import-preview-tbody");
   tbody.innerHTML = "";
-  for (const tag of _pendingS7ImportTags) {
+  for (const tag of _pendingImportTags) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${tag.name}</td><td>${tag.dtype}</td><td>${tag.address}</td>`;
     tbody.appendChild(tr);
   }
-  previewWrap.classList.toggle("hidden", _pendingS7ImportTags.length === 0);
+  previewWrap.classList.toggle("hidden", _pendingImportTags.length === 0);
 }
 
 document.getElementById("s7-import-use-btn").addEventListener("click", () => {
-  importedS7Tags = _pendingS7ImportTags;
-  s7ImportModal.classList.add("hidden");
+  importedTags[_pendingImportTarget] = _pendingImportTags;
+  dbImportModal.classList.add("hidden");
+
+  // The picker (openTagPicker) decides s7 vs. opcua from the main PLC
+  // Connection panel's Backend dropdown, not from this modal's Target
+  // dropdown -- the two are independent, so importing tags for a
+  // target that doesn't match the main dropdown would silently leave
+  // the picker looking at the wrong (empty) bucket. Keep them in sync
+  // on import so "Use These Tags" always makes the ⌕ button work with
+  // what was just imported, without overriding an already-matching
+  // choice (e.g. don't stomp "opcua" with "asyncua" if that's what's
+  // already selected).
+  const target = _pendingImportTarget;
+  const currentBackend = backendSelect.value;
+  const needsSync = target === "s7"
+    ? currentBackend !== "s7"
+    : !["asyncua", "opcua"].includes(currentBackend);
+  if (needsSync) {
+    backendSelect.value = target === "s7" ? "s7" : "asyncua";
+    backendSelect.dispatchEvent(new Event("change"));
+  }
 });
 
 // ---------- PLC tag / node picker ----------
 //
-// One modal serves both sources: the imported S7 tag list (flat,
-// filtered by search) and a live OPC UA browse (drills down through
-// the server's node tree via breadcrumbs). Which one opens depends
-// on the currently selected backend (latestPlc.backend).
+// One modal serves three sources: the imported S7 tag list, the
+// imported (offline, best-effort) OPC UA tag list, and a live OPC UA
+// browse of the connected server's node tree. Which one opens depends
+// on the currently selected backend and, for OPC UA, whether there's
+// a live connection right now -- offline import always works; live
+// Browse is offered as well whenever it's actually available.
 const tagPickerModal = document.getElementById("tag-picker-modal");
 let tagPickerTargetInput = null;
-let tagPickerMode = null;          // "s7" | "opcua"
+let tagPickerMode = null;          // "s7" | "opcua-offline" | "opcua-live"
 let opcuaBreadcrumb = [];          // [{name, node_id}, ...]
 
 function openTagPicker(nodeInput) {
@@ -2072,8 +2219,8 @@ function openTagPicker(nodeInput) {
   // Prefer the server's last-connected backend once one is known (it
   // reflects reality, including a live connection for OPC UA); before
   // any connect attempt has happened, fall back to whatever's chosen
-  // in the Backend dropdown -- browsing imported S7 tags doesn't need
-  // a live connection at all, so there's no reason to force one just
+  // in the Backend dropdown -- offline tag picking doesn't need a
+  // live connection at all, so there's no reason to force one just
   // to open the picker.
   const backend = latestPlc.backend || document.getElementById("plc-backend-select").value;
 
@@ -2082,20 +2229,27 @@ function openTagPicker(nodeInput) {
     document.getElementById("tag-picker-title").textContent = "Select S7 Tag";
     document.getElementById("tag-picker-breadcrumb").classList.add("hidden");
     document.getElementById("tag-picker-filter").value = "";
-    renderS7TagPickerList("");
+    renderOfflineTagPickerList("");
     tagPickerModal.classList.remove("hidden");
     document.getElementById("tag-picker-filter").focus();
   } else if (backend === "asyncua" || backend === "opcua") {
-    if (!latestPlc.connected) {
-      alert("Connect to the PLC first, then browse its live tags.");
-      return;
-    }
-    tagPickerMode = "opcua";
-    document.getElementById("tag-picker-title").textContent = "Browse OPC UA Server";
     document.getElementById("tag-picker-filter").value = "";
-    opcuaBreadcrumb = [{ name: "Objects", node_id: null }];
-    tagPickerModal.classList.remove("hidden");
-    requestOpcuaBrowse(null);
+    if (latestPlc.connected) {
+      // Live browse -- always the most accurate source when it's available.
+      tagPickerMode = "opcua-live";
+      document.getElementById("tag-picker-title").textContent = "Browse OPC UA Server (live)";
+      opcuaBreadcrumb = [{ name: "Objects", node_id: null }];
+      tagPickerModal.classList.remove("hidden");
+      requestOpcuaBrowse(null);
+    } else {
+      // Not connected -- fall back to the offline, imported-from-DB-text list.
+      tagPickerMode = "opcua-offline";
+      document.getElementById("tag-picker-title").textContent = "Select OPC UA Tag (offline, from import)";
+      document.getElementById("tag-picker-breadcrumb").classList.add("hidden");
+      renderOfflineTagPickerList("");
+      tagPickerModal.classList.remove("hidden");
+      document.getElementById("tag-picker-filter").focus();
+    }
   } else {
     alert("Select a connection type in the PLC Connection panel first.");
   }
@@ -2106,7 +2260,11 @@ document.getElementById("tag-picker-close").addEventListener("click", () => {
 });
 
 document.getElementById("tag-picker-filter").addEventListener("input", (e) => {
-  if (tagPickerMode === "s7") renderS7TagPickerList(e.target.value.trim().toLowerCase());
+  if (tagPickerMode === "s7" || tagPickerMode === "opcua-offline") {
+    renderOfflineTagPickerList(e.target.value.trim().toLowerCase());
+  } else if (tagPickerMode === "opcua-live") {
+    requestOpcuaBrowse(opcuaBreadcrumb[opcuaBreadcrumb.length - 1].node_id);
+  }
 });
 
 function pickTagAddress(address) {
@@ -2117,18 +2275,21 @@ function pickTagAddress(address) {
   tagPickerModal.classList.add("hidden");
 }
 
-function renderS7TagPickerList(filterText) {
+function renderOfflineTagPickerList(filterText) {
   const list = document.getElementById("tag-picker-list");
   const empty = document.getElementById("tag-picker-empty");
   list.innerHTML = "";
 
-  if (importedS7Tags.length === 0) {
-    empty.textContent = 'No S7 tags imported yet -- use "Import S7 DB..." below the mapping table first.';
+  const key = tagPickerMode === "s7" ? "s7" : "opcua";
+  const tags = importedTags[key];
+
+  if (tags.length === 0) {
+    empty.textContent = 'No tags imported yet -- use "Import DB Tags..." below the mapping table first.';
     empty.classList.remove("hidden");
     return;
   }
 
-  const matches = importedS7Tags.filter((t) =>
+  const matches = tags.filter((t) =>
     !filterText ||
     t.name.toLowerCase().includes(filterText) ||
     t.address.toLowerCase().includes(filterText)
