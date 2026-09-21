@@ -90,10 +90,65 @@ _MEMBER_RE = re.compile(
 _DB_HEADER_RE = re.compile(r'^\s*DATA_BLOCK\s+"?(?P<name>[^"\n]+?)"?\s*$', re.IGNORECASE)
 
 
+_ATTR_RE = re.compile(r'\{[^{}]*\}')
+
+
 def _strip_comments(text):
     text = re.sub(r'//.*', '', text)
     text = re.sub(r'\(\*.*?\*\)', '', text, flags=re.DOTALL)
+    # Strip TIA attribute annotations like `{ S7_SetPoint := 'False'}` --
+    # these can sit between a member's name and its `:`, which the
+    # member regex below doesn't otherwise tolerate.
+    text = _ATTR_RE.sub('', text)
     return text
+
+
+_TYPE_HEADER_RE = re.compile(r'^\s*TYPE\s+"?(?P<name>[^"\n]+?)"?\s*$', re.IGNORECASE)
+_STRUCT_LINE_RE = re.compile(r'^\s*STRUCT\s*$', re.IGNORECASE)
+_END_STRUCT_LINE_RE = re.compile(r'^\s*END_STRUCT;?\s*$', re.IGNORECASE)
+
+
+def _extract_struct_body(lines, start_idx):
+    """Given the index of a top-level `STRUCT` line, returns
+    (body_lines, end_idx) where end_idx is the index of the matching
+    `END_STRUCT` (depth-aware, so nested inline STRUCTs inside don't
+    end it early)."""
+    depth = 1
+    i = start_idx
+    while i < len(lines):
+        if _STRUCT_LINE_RE.match(lines[i]):
+            depth += 1
+        elif _END_STRUCT_LINE_RE.match(lines[i]):
+            depth -= 1
+            if depth == 0:
+                return lines[start_idx:i], i
+        i += 1
+    return lines[start_idx:], len(lines)
+
+
+def _parse_udt_blocks(lines):
+    """Scans the whole source for `TYPE "Name" ... STRUCT ... END_STRUCT
+    ... END_TYPE` blocks (TIA emits one per UDT referenced by the DB,
+    ahead of the DATA_BLOCK itself) and returns {name: body_lines} so
+    a member typed as `"Name"` can be expanded like an inline STRUCT."""
+    udts = {}
+    i = 0
+    while i < len(lines):
+        m = _TYPE_HEADER_RE.match(lines[i])
+        if m and not lines[i].strip().upper().startswith("DATA_BLOCK"):
+            name = m.group("name").strip()
+            j = i + 1
+            while j < len(lines) and not _STRUCT_LINE_RE.match(lines[j]):
+                j += 1
+            if j < len(lines):
+                body, end_idx = _extract_struct_body(lines, j + 1)
+                udts[name] = body
+                i = end_idx
+        i += 1
+    return udts
+
+
+_UDT_REF_RE = re.compile(r'^"(?P<name>[^"]+)"$')
 
 
 def _round_up_even(n):
@@ -140,10 +195,14 @@ class _Cursor:
             self.byte += 1
 
 
-def _parse_member_lines(lines, warnings, prefix=""):
+def _parse_member_lines(lines, warnings, prefix="", udts=None):
     """Consumes lines (a list with .pop(0) semantics via index) making
     up one STRUCT body, until (but not including) its END_STRUCT. i is
-    a mutable [index] cell so nested calls advance the shared cursor."""
+    a mutable [index] cell so nested calls advance the shared cursor.
+    udts is {UDT name: raw body lines}, from _parse_udt_blocks -- a
+    member typed as `"SomeUdt"` is expanded exactly like an inline
+    STRUCT, recursively (a UDT can itself contain UDT-typed members)."""
+    udts = udts or {}
     members = []
     i = 0
     while i < len(lines):
@@ -164,13 +223,22 @@ def _parse_member_lines(lines, warnings, prefix=""):
 
         struct_match = re.match(r'^STRUCT$', type_text, re.IGNORECASE)
         array_match = _ARRAY_RE.match(type_text)
+        udt_match = _UDT_REF_RE.match(type_text)
 
         if struct_match:
             sub_lines = lines[i:]
             sub_members, consumed = _parse_member_lines(
-                sub_lines, warnings, prefix=f"{full_name}.",
+                sub_lines, warnings, prefix=f"{full_name}.", udts=udts,
             )
             i += consumed
+            members.append(("struct", full_name, sub_members))
+            continue
+
+        if udt_match and udt_match.group("name") in udts:
+            udt_body = udts[udt_match.group("name")]
+            sub_members, _consumed = _parse_member_lines(
+                udt_body, warnings, prefix=f"{full_name}.", udts=udts,
+            )
             members.append(("struct", full_name, sub_members))
             continue
 
@@ -178,7 +246,7 @@ def _parse_member_lines(lines, warnings, prefix=""):
             lo, hi = int(array_match.group(1)), int(array_match.group(2))
             sub_lines = lines[i:]
             sub_members, consumed = _parse_member_lines(
-                sub_lines, warnings, prefix=f"{full_name}[0].",
+                sub_lines, warnings, prefix=f"{full_name}[0].", udts=udts,
             )
             i += consumed
             members.append(("array_struct", full_name, lo, hi, sub_members))
@@ -298,10 +366,12 @@ def _parse_preamble(text):
     clean = _strip_comments(text)
     lines = clean.splitlines()
 
+    header_idx = None
     header_name = None
-    for line in lines:
+    for idx, line in enumerate(lines):
         m = _DB_HEADER_RE.match(line)
         if m:
+            header_idx = idx
             header_name = m.group("name").strip()
             break
 
@@ -311,9 +381,18 @@ def _parse_preamble(text):
             "the whole file generated by TIA Portal's \"Generate source\"."
         )
 
+    # UDTs (TYPE "Name" ... END_TYPE) are emitted ahead of the DATA_BLOCK
+    # that uses them -- collect their bodies so member lines referencing
+    # `"Name"` can be expanded like an inline STRUCT.
+    udts = _parse_udt_blocks(lines[:header_idx])
+
+    # Find the DB's OWN top-level STRUCT -- i.e. the first STRUCT line
+    # at or after the header, not just the first one anywhere in the
+    # file (a UDT/TYPE block declared earlier has its own STRUCT that
+    # must not be picked up here).
     struct_start = None
-    for idx, line in enumerate(lines):
-        if re.match(r'^\s*STRUCT\s*$', line, re.IGNORECASE):
+    for idx in range(header_idx, len(lines)):
+        if _STRUCT_LINE_RE.match(lines[idx]):
             struct_start = idx + 1
             break
 
@@ -322,9 +401,10 @@ def _parse_preamble(text):
             "Couldn't find the DB's top-level \"STRUCT\" block in the pasted text."
         )
 
+    body, _end_idx = _extract_struct_body(lines, struct_start)
     warnings = []
     members, _consumed = _parse_member_lines(
-        lines[struct_start:], warnings, prefix="",
+        body, warnings, prefix="", udts=udts,
     )
     return header_name, members, warnings
 

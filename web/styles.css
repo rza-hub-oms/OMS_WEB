@@ -352,6 +352,10 @@ h1 { font-size: 16px; margin: 0 0 10px; }
   animation: belt 0.7s linear infinite;
 }
 
+.conveyor-ui.running.reverse:before {
+  animation: belt 0.7s linear infinite reverse;
+}
+
 @keyframes belt {
   to { background-position: 43px 0; }
 }

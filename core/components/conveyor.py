@@ -167,9 +167,11 @@ class ConveyorBehavior(SimObject):
             return
 
         dt_sec = dt_ms / 1000.0
-        step = self.speed * self.ANIM_SPEED_SCALE * dt_sec
+        direction = 1.0 if self.direction_forward else -1.0
+        step = self.speed * self.ANIM_SPEED_SCALE * dt_sec * direction
 
         travel = max(0.0, self.width - self.box_width)
+        spawn_pos = 0.0 if self.direction_forward else travel
 
         if travel <= 0:
             self.box_positions = [0.0]
@@ -179,8 +181,12 @@ class ConveyorBehavior(SimObject):
         advanced = []
         for pos in self.box_positions:
             pos += step
-            if pos < travel:
-                advanced.append(pos)
+            if self.direction_forward:
+                if pos < travel:
+                    advanced.append(pos)
+            else:
+                if pos > 0.0:
+                    advanced.append(pos)
         self.box_positions = advanced
 
         # Spacing isn't stored directly -- it's derived from box_count
@@ -189,15 +195,15 @@ class ConveyorBehavior(SimObject):
         # box_count even if width/box_width change live.
         spacing = travel / self.box_count
 
-        self._spawn_accumulator += step
+        self._spawn_accumulator += abs(step)
         while self._spawn_accumulator >= spacing:
             self._spawn_accumulator -= spacing
-            self.box_positions.append(0.0)
+            self.box_positions.append(spawn_pos)
 
         # Safety net: floating-point drift should never leave the belt
         # fully empty for a tick.
         if not self.box_positions:
-            self.box_positions = [0.0]
+            self.box_positions = [spawn_pos]
             self._spawn_accumulator = 0.0
 
     # ---------- PLC I/O mapping (copied verbatim) ----------
@@ -219,6 +225,7 @@ class ConveyorBehavior(SimObject):
             "x": self.x,
             "y": self.y,
             "rotation": self.rotation,
+            "direction_forward": self.direction_forward,
             "box_positions": list(self.box_positions),
             "box_width": self.box_width,
             "box_height": self.box_height,

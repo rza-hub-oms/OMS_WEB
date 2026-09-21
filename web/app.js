@@ -1081,6 +1081,7 @@ function renderConveyor(tagName, c) {
   el.style.transform = `rotate(${c.rotation || 0}deg)`;
   el.style.zIndex = c.layer || 0;
   el.classList.toggle("running", !!c.running);
+  el.classList.toggle("reverse", !c.direction_forward);
 
   const boxHeight = c.box_height ?? Math.min(24, c.height - 4);
   const travel = Math.max(0, c.width - c.box_width);
