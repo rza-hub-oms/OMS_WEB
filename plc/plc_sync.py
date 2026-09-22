@@ -1,3 +1,4 @@
+import logging
 import sys
 #sys.stdout = open("oms_debug.log", "a", buffering=1)
 #sys.stderr = sys.stdout
@@ -191,6 +192,8 @@ def _describe_connect_error(exc):
         return hint
     return f"{type(exc).__name__}: no further details were provided by the connection library."
 
+
+logger = logging.getLogger("oms.plc")
 
 BACKEND_ASYNCUA = "asyncua"
 BACKEND_OPCUA = "opcua"
@@ -455,7 +458,6 @@ class PlcSyncBase:
                 node_ids = set(self._known_node_ids)
                 writes = dict(self._pending_writes)
                 self._pending_writes.clear()
-            print("[PLC BG SWEEP] node_ids =", node_ids)
 
             sweep_ok = True
 
@@ -464,18 +466,7 @@ class PlcSyncBase:
             # every read in this sweep.
             for node_id, value in writes.items():
                 try:
-                    print(
-                        "[PLC ACTUAL WRITE]",
-                        "node=", node_id,
-                        "value=", value,
-                        "type=", type(value).__name__,
-                    )
                     self._write_node(node_id, value)
-                    print(
-                        "[PLC WRITE OK]",
-                        "node=", node_id,
-                        "value=", value,
-                    )
                 except Exception as exc:
                     sweep_ok = False
                     self._report_error(str(exc) or type(exc).__name__)
@@ -488,10 +479,8 @@ class PlcSyncBase:
                 try:
                     value = self._read_node(node_id)
                     new_cache[node_id] = value
-                    print("[PLC READ VALUE]", node_id, "=", value)
                 except Exception as exc:
                     sweep_ok = False
-                    print("[PLC READ FAIL]", node_id, repr(exc))
                     self._report_error(str(exc) or type(exc).__name__)
 
             if new_cache:
@@ -542,7 +531,7 @@ class PlcSyncBase:
             del self.event_log[:-self.EVENT_LOG_MAX]
 
     def _report_error(self, message):
-        print("[PLC ERROR]", message)
+        logger.error("PLC error: %s", message)
         """Records the error, but only when the message actually
         changed -- a node that's broken every single sweep would
         otherwise flood the log five times a second."""
@@ -579,7 +568,6 @@ class PlcSyncBase:
             mapping_error = type(self).validate_address(
                 entry["plc_node"], expected_type=oms_type,
             )
-            print("[POLL RESOLVED]", entry["item"].tag_name, entry["io_point"], entry["plc_node"], "error=", mapping_error)
             resolved.append((entry, oms_type, mapping_error))
 
         node_ids_needed = {
@@ -692,7 +680,7 @@ class PlcSyncBase:
         by_tag = {}
         for obj in self.scene.objects.values():
             tag = getattr(obj, "tag_name", None)
-            if tag is not None and hasattr(obj, "get_plc_io_points"):
+            if tag is not None and hasattr(obj, "get_io_signals"):
                 by_tag[tag] = obj
 
         resolved = []
@@ -701,12 +689,12 @@ class PlcSyncBase:
             if item is None:
                 continue
 
-            io_points = item.get_plc_io_points()
-            point = io_points.get(entry.get("io_point"))
-            if point is None:
+            signals = {signal.name: signal for signal in item.get_io_signals()}
+            signal = signals.get(entry.get("io_point"))
+            if signal is None:
                 continue
 
-            getter, setter = point
+            getter, setter = signal.getter, signal.setter
             node_id = entry.get("plc_node")
             if not node_id:
                 continue

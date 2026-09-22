@@ -1,4 +1,5 @@
 from core.sim_object import SimObject
+from core.io import Signal
 
 
 class SensorBehavior(SimObject):
@@ -111,6 +112,9 @@ class SensorBehavior(SimObject):
         pass
 
     # ---------- PLC ----------
+
+    def get_io_signals(self):
+        return [Signal("detected", self.get_detected, None, bool, "Sensor output") ]
 
     def get_plc_io_points(self):
         return {

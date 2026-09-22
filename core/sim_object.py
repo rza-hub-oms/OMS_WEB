@@ -1,5 +1,8 @@
 # core/sim_object.py
 
+from core.io import Signal
+
+
 class SimObject:
     """Base class for all simulated PLC-connected components. Qt-free —
     holds only identity + geometry needed by any component type."""
@@ -38,6 +41,14 @@ class SimObject:
 
     def advance_animation(self, dt_ms: float) -> None:
         raise NotImplementedError
+
+    def get_io_signals(self) -> list[Signal]:
+        """Typed signal descriptors. Components can override this; the
+        compatibility method below is kept for existing PLC adapters."""
+        return [
+            Signal(name, getter, setter, datatype=type(getter()))
+            for name, (getter, setter) in self.get_plc_io_points().items()
+        ]
 
     def get_plc_io_points(self) -> dict:
         """Return {point_name: (getter, setter_or_None)}."""

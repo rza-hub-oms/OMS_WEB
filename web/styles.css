@@ -348,16 +348,8 @@ h1 { font-size: 16px; margin: 0 0 10px; }
   opacity: .6;
 }
 
-.conveyor-ui.running:before {
-  animation: belt 0.7s linear infinite;
-}
-
-.conveyor-ui.running.reverse:before {
-  animation: belt 0.7s linear infinite reverse;
-}
-
-@keyframes belt {
-  to { background-position: 43px 0; }
+.conveyor-ui:before {
+  background-position: var(--belt-phase, 0px) 0;
 }
 
 /* The box is real (positioned from actual box_positions data), unlike
@@ -1640,3 +1632,11 @@ button:hover { background: #25445c; border-color: #3488c7; }
 .tag-picker-name { flex: 1; color: #dce5ef; }
 .tag-picker-type { color: var(--muted); font-size: 11px; }
 .tag-picker-address { color: #7fb8e8; font-family: "Consolas", "Courier New", monospace; font-size: 11px; }
+.selection-marquee {
+  position: absolute;
+  z-index: 10000;
+  pointer-events: none;
+  border: 1px solid #4da3ff;
+  background: rgba(77, 163, 255, 0.15);
+  box-sizing: border-box;
+}

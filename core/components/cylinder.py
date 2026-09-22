@@ -104,9 +104,14 @@ class CylinderBehavior(SimObject):
         self._was_fully_extended = False
         self._extend_trigger_pending = False
 
-        # Which conveyor (by tag_name) this cylinder is allowed to push
-        # a box off of when it reaches full extension. None = disabled.
-        self.target_conveyor = None
+        # Which other component (by tag_name) this cylinder physically
+        # interacts with when it reaches full extension. None = disabled.
+        # What "interacts with" means depends on the target's component
+        # type -- see Scene.CYLINDER_RELATION_HANDLERS, which currently
+        # only knows how to push a box off a conveyor, but can gain more
+        # handlers (e.g. pressing a sensor or button) without this field
+        # or its UI needing to change.
+        self.target_tag = None
 
     # ------------------------------------------------------------------
     # Geometry
@@ -147,11 +152,11 @@ class CylinderBehavior(SimObject):
     # Valve
     # ------------------------------------------------------------------
 
-    def set_target_conveyor(self, tag_name) -> None:
-        self.target_conveyor = tag_name if tag_name else None
+    def set_target_tag(self, tag_name) -> None:
+        self.target_tag = tag_name if tag_name else None
 
-    def get_target_conveyor(self):
-        return self.target_conveyor
+    def get_target_tag(self):
+        return self.target_tag
 
     def set_valve_type(self, value: str) -> None:
         if value not in (self.VALVE_SINGLE, self.VALVE_DUAL):
@@ -581,7 +586,7 @@ class CylinderBehavior(SimObject):
                 "valve_type": self.valve_type,
                 "extend_command": self.extend_command,
                 "retract_command": self.retract_command,
-                "target_conveyor": self.target_conveyor,
+                "target_tag": self.target_tag,
                 "moving": self.is_moving(),
                 "rod_tip": {
                     "x": self.get_rod_tip_position()[0],

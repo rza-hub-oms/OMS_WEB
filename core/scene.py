@@ -34,6 +34,53 @@ COMPONENT_REGISTRY = {
 }
 
 TICK_MS = 50
+MAX_DT_S = 0.25
+
+
+def _push_box_off_conveyor(cylinder: "CylinderBehavior", target: "ConveyorBehavior") -> None:
+    """Remove a conveyor box when the cylinder rod tip actually
+    overlaps the box.
+
+    Uses the cylinder's actual world-space rod tip, including rotation,
+    rather than just comparing footprint x-position, so a visible
+    collision is not missed.
+    """
+    tip_x, tip_y = cylinder.get_rod_tip_position()
+
+    # Give the tip a small contact radius so the 50 ms simulation
+    # tick cannot skip a visually obvious hit.
+    contact_radius = max(4.0, min(12.0, target.box_width * 0.15))
+
+    kept = []
+    for pos in target.box_positions:
+        box_left = target.x + pos
+        box_right = box_left + target.box_width
+        box_top = target.y
+        box_bottom = target.y + target.height
+
+        is_hit = (
+            tip_x + contact_radius >= box_left
+            and tip_x - contact_radius <= box_right
+            and tip_y + contact_radius >= box_top
+            and tip_y - contact_radius <= box_bottom
+        )
+        if not is_hit:
+            kept.append(pos)
+
+    target.box_positions = kept
+
+
+# Maps a target component's class to the function that defines what a
+# fully-extended cylinder does to it. To give the cylinder a new kind
+# of physical relation (e.g. pressing a sensor or a push button), write
+# a handler with the same signature -- handler(cylinder, target) -- and
+# add it here. Nothing else (the UI dropdown, the tick loop, the
+# component-select field) needs to change: the dropdown already offers
+# every component type, and the tick loop already looks the target's
+# class up in this dict.
+CYLINDER_RELATION_HANDLERS = {
+    ConveyorBehavior: _push_box_off_conveyor,
+}
 
 
 class Scene:
@@ -61,8 +108,17 @@ class Scene:
         """Add a component to the scene, keyed by its tag_name."""
         self.objects[obj.tag_name] = obj
 
-    def remove(self, tag_name: str) -> None:
-        self.objects.pop(tag_name, None)
+    def remove(self, tag_name: str) -> bool:
+        """Remove a component and return whether it existed."""
+        if tag_name not in self.objects:
+            return False
+        del self.objects[tag_name]
+        # Keep PLC mappings consistent when a component is deleted.
+        self.plc_mapping = [
+            mapping for mapping in self.plc_mapping
+            if mapping.get("object_tag") != tag_name
+        ]
+        return True
 
     def get(self, tag_name: str):
         return self.objects.get(tag_name)
@@ -105,8 +161,9 @@ class Scene:
         self.objects.clear()
         self._type_counters.clear()
         self._cylinder_previously_extended.clear()
+        self.plc_mapping.clear()
 
-    def tick(self, dt_ms: float = TICK_MS, simulate: bool = True) -> None:
+    def tick(self, dt_seconds: float = TICK_MS / 1000.0, simulate: bool = True) -> None:
         """Advance every component by one simulation step, then update
         sensor detection against the now-current box positions.
 
@@ -117,6 +174,13 @@ class Scene:
         vs. a live PLC via plc_sync), not whether physics runs."""
         if not simulate:
             return
+
+        # The loop uses a monotonic clock, so the simulation is based on
+        # real elapsed time rather than assuming the event loop woke up
+        # exactly every 50 ms. Cap a long stall so a temporary debugger
+        # pause cannot teleport components across the machine.
+        dt_seconds = max(0.0, min(float(dt_seconds), MAX_DT_S))
+        dt_ms = dt_seconds * 1000.0
 
         if self.is_emergency_stopped():
             # Everything else freezes, but a single-valve (single-
@@ -143,66 +207,35 @@ class Scene:
             obj.advance_animation(dt_ms)
 
         self._update_sensors()
-        self._handle_cylinder_box_removal()
+        self._handle_cylinder_relations()
 
-    def _handle_cylinder_box_removal(self) -> None:
-        """Remove a conveyor box when the cylinder rod tip actually
-        overlaps the box.
-
-        The old code compared the cylinder footprint's ``x`` position
-        with the box position.  That is not the rod-tip position, so a
-        visible collision could be missed.  This uses the cylinder's
-        actual world-space rod tip, including rotation.
+    def _handle_cylinder_relations(self) -> None:
+        """Runs each fully-extended cylinder's physical relation (see
+        CYLINDER_RELATION_HANDLERS) against its target component, if
+        any. Which handler runs depends only on the target's type, so
+        a cylinder can be pointed at any component; if no handler is
+        registered for that type yet, nothing happens.
         """
         for obj in self.objects.values():
             if not isinstance(obj, CylinderBehavior):
                 continue
 
-            # Only collide while the cylinder is commanded to extend.
+            # Only interact while the cylinder is commanded to extend.
             if obj.valve_type == obj.VALVE_DUAL:
                 extending = obj.extend_command and not obj.retract_command
-            else:                         
+            else:
                 extending = obj.extended
 
-            if not extending or not obj.target_conveyor or obj.progress < 1.0:                   
+            if not extending or not obj.target_tag or obj.progress < 1.0:
                 continue
 
-            target = self.objects.get(obj.target_conveyor)
-            if target is None or not isinstance(target, ConveyorBehavior):
+            target = self.objects.get(obj.target_tag)
+            if target is None:
                 continue
 
-            tip_x, tip_y = obj.get_rod_tip_position()
-
-            # Give the tip a small contact radius so the 50 ms simulation
-            # tick cannot skip a visually obvious hit.
-            contact_radius = max(
-                4.0,
-                min(12.0, target.box_width * 0.15),
-            )
-
-            kept = []
-            for pos in target.box_positions:
-                box_left = target.x + pos
-                box_right = box_left + target.box_width
-                                                                                      
-                box_top = target.y
-                box_bottom = target.y + target.height
-
-                is_hit = (
-                    tip_x + contact_radius >= box_left
-                    and tip_x - contact_radius <= box_right
-                    and tip_y + contact_radius >= box_top
-                    and tip_y - contact_radius <= box_bottom
-                )
-
-                if not is_hit:
-                                                                  
-                            
-                
-                    kept.append(pos)
-
-                                                        
-            target.box_positions = kept
+            handler = CYLINDER_RELATION_HANDLERS.get(type(target))
+            if handler is not None:
+                handler(obj, target)
                             
     def _update_sensors(self) -> None:
         """Update sensor detection for conveyors and cylinders.
@@ -282,23 +315,35 @@ class Scene:
         This is what gets pushed to the browser over WebSocket each tick."""
         return {name: obj.to_dict() for name, obj in self.objects.items()}
 
+    def signal_catalog(self) -> list:
+        """Return the typed signal catalog used by the PLC mapping UI."""
+        rows = []
+        for tag_name in sorted(self.objects):
+            obj = self.objects[tag_name]
+            signals = obj.get_io_signals()
+            for signal in sorted(signals, key=lambda s: s.name):
+                rows.append({
+                    "object_tag": tag_name,
+                    "io_point": signal.name,
+                    "direction": signal.direction,
+                    "datatype": signal.datatype.__name__ if signal.datatype else None,
+                    "description": signal.description,
+                })
+        return rows
+
     def io_points_catalog(self) -> list:
         """Every (object_tag, io_point, direction) triple currently in
         the scene, sorted the same way MappingPanel._scan_scene() did
         (by object tag, then point name) -- the web Mapping panel's
         "Rescan Scene" reads this to (re)build its rows."""
-        rows = []
-        for tag_name in sorted(self.objects.keys()):
-            obj = self.objects[tag_name]
-            io_points = obj.get_plc_io_points()
-            for point_name in sorted(io_points.keys()):
-                _getter, setter = io_points[point_name]
-                rows.append({
-                    "object_tag": tag_name,
-                    "io_point": point_name,
-                    "direction": "PLC -> OMS" if setter is not None else "OMS -> PLC",
-                })
-        return rows
+        return [
+            {
+                "object_tag": row["object_tag"],
+                "io_point": row["io_point"],
+                "direction": row["direction"],
+            }
+            for row in self.signal_catalog()
+        ]
 
     @staticmethod
     def _coerce_value(text):

@@ -8,7 +8,9 @@ import asyncio
 import base64
 import json
 import logging
-import os
+import time
+
+from project.model import ProjectSession
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -32,36 +34,41 @@ VALID_MODES = ("design", "simulation", "runtime")
 # and re-opens the WebSocket -- this grace period lets that reconnect
 # cancel the shutdown instead of killing the whole app on a refresh.
 SHUTDOWN_GRACE_S = 5.0
+# Browser refreshes no longer terminate the whole Python process.
+# The development launcher owns server lifetime instead.
 
 
 class ConnectionManager:
-    """Tracks connected browser clients and broadcasts JSON state to all
-    of them. Kept separate from the Scene itself, since the Scene knows
-    nothing about WebSockets.
-
-    Also shuts the backend process down once the last browser window
-    closes (mirrors main.py auto-opening the browser on start -- this
-    is the reverse: closing the browser stops the backend too)."""
+    """Owns one ProjectSession per WebSocket client."""
 
     def __init__(self):
         self.active: list[WebSocket] = []
+        self.sessions: dict[WebSocket, ProjectSession] = {}
+        self._tick_tasks: dict[WebSocket, asyncio.Task] = {}
         self._shutdown_task = None
 
-    async def connect(self, ws: WebSocket) -> None:
+    async def connect(self, ws: WebSocket) -> ProjectSession:
         await ws.accept()
+        session = ProjectSession()
         self.active.append(ws)
-
+        self.sessions[ws] = session
+        self._tick_tasks[ws] = asyncio.create_task(_session_tick_loop(ws, session))
         if self._shutdown_task is not None:
             self._shutdown_task.cancel()
             self._shutdown_task = None
-
         logger.info("Client connected (%d total)", len(self.active))
+        return session
 
     def disconnect(self, ws: WebSocket) -> None:
+        session = self.sessions.pop(ws, None)
+        tick_task = self._tick_tasks.pop(ws, None)
+        if tick_task is not None:
+            tick_task.cancel()
+        if session is not None:
+            session.close()
         if ws in self.active:
             self.active.remove(ws)
         logger.info("Client disconnected (%d total)", len(self.active))
-
         if not self.active and self._shutdown_task is None:
             self._shutdown_task = asyncio.get_event_loop().create_task(
                 self._shutdown_after_grace()
@@ -72,45 +79,37 @@ class ConnectionManager:
             await asyncio.sleep(SHUTDOWN_GRACE_S)
         except asyncio.CancelledError:
             return
-
         if not self.active:
-            logger.info("No browser windows connected -- shutting down.")
-            os._exit(0)
+            logger.info("No browser windows connected -- server remains available for reconnect.")
 
-    async def broadcast(self, payload: dict) -> None:
-        message = json.dumps(payload)
-        stale = []
-        for ws in self.active:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                stale.append(ws)
-        for ws in stale:
+    async def broadcast(self, ws: WebSocket, payload: dict) -> None:
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
             self.disconnect(ws)
 
 
 manager = ConnectionManager()
 
 
-def _plc_status() -> dict:
+def _plc_status(session: ProjectSession) -> dict:
     """Everything the Mapping panel needs to render each tick: which
     backends are installed, the live connection (if any), its recent
     event log, and the current mapping list -- the web equivalent of
     what MappingPanel._scan_scene() + _refresh_live_values() pull from
     sim_view/plc_sync in the original desktop app."""
-    import api.server as server
-
-    sync = server.plc_sync
+    sync = session.plc_sync
     return {
         "available_backends": AVAILABLE_BACKENDS,
         "address_format_hints": ADDRESS_FORMAT_HINTS,
         "connected": bool(sync and sync.is_connected),
         "paused": bool(sync and sync.is_paused),
-        "backend": server.selected_plc_backend,
+        "backend": session.selected_plc_backend,
         "comms_healthy": bool(sync and sync._comms_healthy) if sync else True,
-        "last_error": (sync.last_error if sync else getattr(server, "_last_connect_error", None)),
+        "last_error": (sync.last_error if sync else session.last_connect_error),
         "event_log": list(sync.event_log) if sync else [],
-        "mapping": server.scene.plc_mapping,
+        "mapping": session.scene.plc_mapping,
+        "signals": session.scene.signal_catalog(),
     }
 
 
@@ -133,9 +132,7 @@ async def websocket_endpoint(ws: WebSocket):
     Outgoing messages (pushed by the tick loop, not sent from here):
         {"objects": {"Conveyor_1": {...}, ...}, "plc": {...}}
     """
-    import api.server as server  # local import avoids a circular import
-
-    await manager.connect(ws)
+    session = await manager.connect(ws)
     try:
         while True:
             raw = await ws.receive_text()
@@ -150,7 +147,7 @@ async def websocket_endpoint(ws: WebSocket):
                         continue
 
                     if requested_mode == "runtime" and not (
-                        server.plc_sync is not None and server.plc_sync.is_connected
+                        session.plc_sync is not None and session.plc_sync.is_connected
                     ):
                         # RUNTIME means "connected to the actual PLC" --
                         # refuse to enter it without a live connection
@@ -161,12 +158,12 @@ async def websocket_endpoint(ws: WebSocket):
                         continue
 
                     if requested_mode == "design":
-                        server.scene.stop_all_actuators()
+                        session.scene.stop_all_actuators()
 
-                    server.mode = requested_mode
+                    session.mode = requested_mode
                     continue
                 elif action == "set_point":
-                    server.scene.apply_command(
+                    session.scene.apply_command(
                         command["tag_name"],
                         command["point"],
                         command["value"],
@@ -181,21 +178,21 @@ async def websocket_endpoint(ws: WebSocket):
                     }
 
                     if property_name in runtime_properties:
-                        if server.mode == "design":
+                        if session.mode == "design":
                             continue
-                    elif server.mode != "design":
+                    elif session.mode != "design":
                         continue
 
-                    server.scene.apply_property(
+                    session.scene.apply_property(
                         tag_name,
                         property_name,
                         command["value"],
                     )
                 elif action == "add_component":
-                    if server.mode != "design":
+                    if session.mode != "design":
                         continue
 
-                    obj = server.scene.create_component(
+                    obj = session.scene.create_component(
                         command["component_type"],
                         command["x"],
                         command["y"],
@@ -205,36 +202,36 @@ async def websocket_endpoint(ws: WebSocket):
                             "Unknown component_type %r", command["component_type"]
                         )
                 elif action == "delete_component":
-                    if server.mode != "design":
+                    if session.mode != "design":
                         continue
                     tag_name = command["tag_name"]
 
-                    if not server.scene.remove(tag_name):
+                    if not session.scene.remove(tag_name):
                         logger.warning("Component %r not found", tag_name)
 
                 elif action == "plc_connect":
-                    await _plc_connect(server, command["backend"], command.get("params", {}))
+                    await _plc_connect(session, command["backend"], command.get("params", {}))
                 elif action == "plc_disconnect":
-                    _plc_disconnect(server)
+                    _plc_disconnect(session)
                 elif action == "plc_pause":
-                    if server.plc_sync is not None:
-                        server.plc_sync.pause()
+                    if session.plc_sync is not None:
+                        session.plc_sync.pause()
                 elif action == "plc_resume":
-                    if server.plc_sync is not None:
-                        server.plc_sync.resume()
+                    if session.plc_sync is not None:
+                        session.plc_sync.resume()
                 elif action == "plc_set_mapping":
                     # Replaces the whole list in one shot -- simpler
                     # than per-row add/remove actions, and matches how
                     # the frontend's mapping table submits its rows
                     # (see web/app.js's Apply Mappings button).
-                    server.scene.plc_mapping = [
+                    session.scene.plc_mapping = [
                         m for m in command.get("mappings", [])
                         if m.get("plc_node", "").strip()
                     ]
                 elif action == "plc_force":
-                    if server.mode == "design":
+                    if session.mode == "design":
                         continue
-                    server.scene.force_value(
+                    session.scene.force_value(
                         command["tag_name"], command["io_point"], command["value"],
                     )
                 elif action == "plc_import_db_tags":
@@ -284,31 +281,38 @@ async def websocket_endpoint(ws: WebSocket):
                             "db_import_result": {"target": target, "error": str(exc)},
                         }))
                 elif action == "plc_browse_opcua":
-                    await _plc_browse_opcua(server, ws, command.get("node_id"))
+                    await _plc_browse_opcua(session, ws, command.get("node_id"))
                 elif action == "load_project":
-                    if server.mode != "design":
+                    if session.mode != "design":
                         continue
                     from project.serialization import load_project_dict
-                    load_project_dict(server.scene, command.get("data", {}))
+                    info = load_project_dict(session.scene, command.get("data", {}))
+                    session.project.name = info["name"]
+                    session.project.metadata = info["metadata"]
+                    session.project.version = info["version"]
                 elif action == "restore_objects":
                     # Undo/Redo: replaces component placement/state only --
                     # PLC mapping and connection settings are untouched.
-                    if server.mode != "design":
+                    if session.mode != "design":
                         continue
                     from project.serialization import load_objects_only
-                    load_objects_only(server.scene, command.get("objects", []))
+                    load_objects_only(session.scene, command.get("objects", []))
                 elif action == "reset_view":
-                    if server.mode != "design":
+                    if session.mode != "design":
                         continue
-                    server.scene.reset_simulation_state()
+                    session.scene.reset_simulation_state()
                 elif action == "plc_validate":
                     await ws.send_text(json.dumps({
-                        "plc_validation": _validate_mappings(server),
+                        "plc_validation": _validate_mappings(session),
                     }))
                 elif action == "save_project":
                     from project.serialization import scene_to_project_dict
                     await ws.send_text(json.dumps({
-                        "project_data": scene_to_project_dict(server.scene),
+                        "project_data": scene_to_project_dict(
+                            session.scene,
+                            name=session.project.name,
+                            metadata=session.project.metadata,
+                        ),
                     }))
                 else:
                     logger.warning("Unknown action %r", action)
@@ -328,50 +332,50 @@ async def websocket_endpoint(ws: WebSocket):
 CONNECT_TIMEOUT_S = 10.0
 
 
-async def _plc_connect(server, backend: str, params: dict) -> None:
+async def _plc_connect(session: ProjectSession, backend: str, params: dict) -> None:
     """Opens a PLC connection, mirroring PlcConnectDialog's accept
     handler + main_window.py's start_plc_connection(). Any failure
     (bad params, library not installed, network error, timeout) is
     caught and surfaced via last_error/event_log instead of raising,
     since there's no modal dialog here to catch an exception."""
-    if server.plc_sync is not None:
-        _plc_disconnect(server)
+    if session.plc_sync is not None:
+        _plc_disconnect(session)
 
-    server._last_connect_error = None
-    server.scene.plc_connection = {"backend": backend, "params": dict(params)}
+    session.last_connect_error = None
+    session.scene.plc_connection = {"backend": backend, "params": dict(params)}
     try:
-        sync = create_plc_sync(backend, server.scene, **params)
+        sync = create_plc_sync(backend, session.scene, **params)
         await asyncio.wait_for(
             asyncio.to_thread(sync.open_connection), timeout=CONNECT_TIMEOUT_S,
         )
     except asyncio.TimeoutError:
-        server.plc_sync = None
-        server.selected_plc_backend = backend
-        server._last_connect_error = (
+        session.plc_sync = None
+        session.selected_plc_backend = backend
+        session.last_connect_error = (
             f"Connection attempt timed out after {CONNECT_TIMEOUT_S:.0f}s."
         )
         logger.warning("PLC connect timed out: backend=%r", backend)
         return
     except Exception as exc:
-        server.plc_sync = None
-        server.selected_plc_backend = backend
-        server._last_connect_error = str(exc)
+        session.plc_sync = None
+        session.selected_plc_backend = backend
+        session.last_connect_error = str(exc)
         logger.warning("PLC connect failed: %s", exc)
         return
 
-    server.plc_sync = sync
-    server.selected_plc_backend = backend
+    session.plc_sync = sync
+    session.selected_plc_backend = backend
 
 
 BROWSE_TIMEOUT_S = 10.0
 
 
-async def _plc_browse_opcua(server, ws, node_id) -> None:
+async def _plc_browse_opcua(session: ProjectSession, ws, node_id) -> None:
     """Browses one level of the connected OPC UA server's node tree
     for the Mapping panel's tag picker. Needs a live connection --
     unlike the S7 DB importer, there's no offline file to read here,
     the server itself is the address list."""
-    sync = server.plc_sync
+    sync = session.plc_sync
     if sync is None or not sync.is_connected or sync._client is None:
         await ws.send_text(json.dumps({
             "opcua_browse_result": {"error": "Connect to the PLC first."},
@@ -400,37 +404,40 @@ async def _plc_browse_opcua(server, ws, node_id) -> None:
     }))
 
 
-def _plc_disconnect(server) -> None:
-    if server.plc_sync is not None:
-        server.plc_sync.close_connection()
-    server.plc_sync = None
+def _plc_disconnect(session: ProjectSession) -> None:
+    if session.plc_sync is not None:
+        session.plc_sync.close_connection()
+    session.plc_sync = None
 
     # RUNTIME requires a live PLC by definition -- losing the connection
     # drops back to DESIGN rather than leaving the UI stuck showing a
     # "live" screen that isn't live anymore.
-    if server.mode == "runtime":
-        server.mode = "design"
+    if session.mode == "runtime":
+        session.mode = "design"
 
 
-def _validate_mappings(server) -> list:
+def _validate_mappings(session: ProjectSession) -> list:
     """Same check as the original's "Validate Mappings" button: every
     mapped PLC Node ID against the selected backend's address format,
     no live connection needed."""
-    backend = server.selected_plc_backend
+    backend = session.selected_plc_backend
     if backend is None:
         return [{"error": "Choose a connection type first (Connect), then validate again."}]
 
     problems = []
-    for entry in server.scene.plc_mapping:
-        obj = server.scene.objects.get(entry.get("object_tag"))
+    for entry in session.scene.plc_mapping:
+        obj = session.scene.objects.get(entry.get("object_tag"))
         expected_type = None
         if obj is not None:
-            point = obj.get_plc_io_points().get(entry.get("io_point"))
-            if point is not None and point[0] is not None:
-                try:
-                    expected_type = type(point[0]())
-                except Exception:
-                    expected_type = None
+            signals = {signal.name: signal for signal in obj.get_io_signals()}
+            signal = signals.get(entry.get("io_point"))
+            if signal is not None:
+                expected_type = signal.datatype
+                if expected_type is None:
+                    try:
+                        expected_type = type(signal.read())
+                    except Exception:
+                        expected_type = None
 
         error = validate_address_for_backend(
             backend, entry.get("plc_node", ""), expected_type=expected_type,
@@ -445,19 +452,38 @@ def _validate_mappings(server) -> list:
     return problems
 
 
-async def tick_loop(scene) -> None:
-    """Runs forever: advances the scene, polls the live PLC connection
-    (if any), and broadcasts state every TICK_MS milliseconds. Started
-    as a background task in server.py's lifespan handler."""
-    import api.server as server
-
-    interval_sec = TICK_MS / 1000.0
+async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
+    """Run one deterministic simulation clock for one browser session."""
+    last = time.monotonic()
     while True:
-        # DESIGN is frozen (editing only); SIMULATION and RUNTIME both
-        # animate -- they differ in where commands come from, not
-        # whether the scene moves.
-        scene.tick(TICK_MS, simulate=(server.mode != "design"))
-        if server.plc_sync is not None and server.mode == "runtime":
-            server.plc_sync.poll()
-        await manager.broadcast({"objects": scene.to_dict(), "plc": _plc_status(), "mode": server.mode,})
-        await asyncio.sleep(interval_sec)
+        now = time.monotonic()
+        dt_seconds = now - last
+        last = now
+        try:
+            session.scene.tick(dt_seconds, simulate=(session.mode != "design"))
+            if session.plc_sync is not None and session.mode == "runtime":
+                session.plc_sync.poll()
+            await manager.broadcast(
+                ws,
+                {
+                    "objects": session.scene.to_dict(),
+                    "plc": _plc_status(session),
+                    "mode": session.mode,
+                    "project": {
+                        "name": session.project.name,
+                        "version": session.project.version,
+                    },
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Session tick failed")
+        await asyncio.sleep(TICK_MS / 1000.0)
+
+
+async def tick_loop() -> None:
+    """Compatibility helper for embedding OMS in another ASGI host.
+    Normal operation starts one clock per ProjectSession in connect()."""
+    while True:
+        await asyncio.sleep(3600)

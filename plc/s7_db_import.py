@@ -346,12 +346,31 @@ def _layout_scalar(name, type_text, cursor, warnings, out):
 
 
 def _format_address(db_number, entry):
-    if entry["dtype"] == "BOOL":
-        return f"DB{db_number}.DBX{entry['byte']}.{entry['bit']}"
-    letter = entry["_letter"]
+    """Return canonical Siemens S7 DB notation for imported addresses.
+
+    The Mapping panel should use the PLC-native forms rather than OMS
+    typed aliases: BOOL -> DBX, 16-bit values -> DBW, and 32-bit values
+    -> DBD.  The underlying dtype is still retained separately in the
+    imported tag metadata.
+    """
+    dtype = entry["dtype"]
+    byte = entry["byte"]
+    if dtype == "BOOL":
+        return f"DB{db_number}.DBX{byte}.{entry['bit']}"
+
+    if dtype in ("BYTE", "CHAR", "SINT", "USINT"):
+        return f"DB{db_number}.DBB{byte}"
+    if dtype in ("WORD", "INT", "UINT", "DATE"):
+        return f"DB{db_number}.DBW{byte}"
+    if dtype in ("DWORD", "DINT", "UDINT", "REAL", "TIME"):
+        return f"DB{db_number}.DBD{byte}"
+
+    # Fallback for any future scalar type that supplies one of the
+    # canonical letters.  Never emit typed aliases such as INT/REAL.
+    letter = entry.get("_letter")
     if letter in ("X", "B", "W", "D"):
-        return f"DB{db_number}.DB{letter}{entry['byte']}"
-    return f"DB{db_number}.{letter}{entry['byte']}"
+        return f"DB{db_number}.DB{letter}{byte}"
+    raise S7ImportError(f"Cannot format S7 address for imported type {dtype!r}")
 
 
 def _parse_preamble(text):

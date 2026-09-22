@@ -1,6 +1,7 @@
 # main.py
 """Entry point for the OMS web prototype."""
 
+import logging
 import threading
 import time
 import webbrowser
@@ -14,6 +15,7 @@ def open_browser():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     threading.Thread(target=open_browser, daemon=True).start()
 
     uvicorn.run(

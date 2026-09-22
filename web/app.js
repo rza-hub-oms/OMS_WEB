@@ -1,4 +1,6 @@
-// web/app.js
+// web/app.js — UI composition and interaction layer
+import { send, setMessageHandler } from "./modules/socket.js";
+import { renderConveyor } from "./modules/conveyor-renderer.js";
 // Connects to the backend WebSocket, renders each component as a real
 // DOM element positioned from actual Scene state, and supports
 // dragging new components from the dock onto the canvas.
@@ -49,6 +51,10 @@ const modeDescription = document.getElementById("mode-description");
 const runtimeAlarmBar = document.getElementById("runtime-alarm-bar");
 
 let panning = false;
+let selectionMarquee = null;
+let marqueeStartX = 0;
+let marqueeStartY = 0;
+let marqueeAdditive = false;
 let panStartX = 0;
 let panStartY = 0;
 let panOriginX = 0;
@@ -102,10 +108,10 @@ function updateUndoRedoButtons() {
 }
 
 function restoreSnapshot(snapshot) {
-  ws.send(JSON.stringify({
+  send({
     action: "restore_objects",
     objects: JSON.parse(snapshot),
-  }));
+  });
 }
 
 document.getElementById("undo-btn").addEventListener("click", () => {
@@ -156,17 +162,17 @@ function updateRuntimeAlarmBar() {
 }
 
 designModeBtn.addEventListener("click", () => {
-  ws.send(JSON.stringify({
+  send({
     action: "set_mode",
     mode: "design",
-  }));
+  });
 });
 
 simulationModeBtn?.addEventListener("click", () => {
-  ws.send(JSON.stringify({
+  send({
     action: "set_mode",
     mode: "simulation",
-  }));
+  });
 });
 
 runtimeModeBtn.addEventListener("click", () => {
@@ -175,10 +181,10 @@ runtimeModeBtn.addEventListener("click", () => {
     return;
   }
 
-  ws.send(JSON.stringify({
+  send({
     action: "set_mode",
     mode: "runtime",
-  }));
+  });
 });
 
 canvasViewport.addEventListener(
@@ -244,6 +250,8 @@ const elements = {};
 
 const propertyBody = document.getElementById("property-body");
 let selectedTag = null;
+let selectedTags = new Set();
+let suppressSelection = false;
 
 // Runs the initial mode-bar/palette state now that latestState,
 // propertyBody and selectedTag (used by renderPropertyPanel(), which
@@ -267,7 +275,7 @@ const PROPERTY_FIELDS = {
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Width", type: "number", min: 30, max: 5000, suffix: " px" },
     { key: "height", send: "height", label: "Height", type: "number", min: 4, max: 200, suffix: " px" },
-    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "90", suffix: " °" },
+    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "1", suffix: " °" },
     { key: "direction", send: "direction", label: "Direction", type: "select",
       options: [["1", "Forward"], ["0", "Reverse"]] },
     { key: "speed", send: "speed", label: "Speed", type: "number", min: 0, max: 5000, suffix: " mm/s" },
@@ -281,11 +289,15 @@ const PROPERTY_FIELDS = {
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Width", type: "number", min: 40, max: 1000, suffix: " px" },
     { key: "height", send: "height", label: "Height", type: "number", min: 24, max: 1000, suffix: " px" },
-    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "90", suffix: " °" },
+    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "1", suffix: " °" },
     { key: "speed", send: "speed", label: "Speed", type: "number", min: 0, max: 5000 },
     { key: "valve_type", send: "valve_type", label: "Valve Type", type: "select",
       options: [["single", "Single (1 tag)"], ["dual", "Dual (2 tags, hold)"]] },
-    { key: "target_conveyor", send: "target_conveyor", label: "Push Box Off Conveyor", type: "component-select", filterTypes: ["conveyor"] },
+    // filterTypes lists every component type CYLINDER_RELATION_HANDLERS
+    // (core/scene.py) currently has a handler for. Add a type here only
+    // once its handler exists server-side -- offering a target with no
+    // handler would let it be selected but silently do nothing.
+    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor"] },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
   motor: [
@@ -293,7 +305,7 @@ const PROPERTY_FIELDS = {
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Width", type: "number", min: 30, max: 5000, suffix: " px" },
     { key: "height", send: "height", label: "Height", type: "number", min: 4, max: 200, suffix: " px" },
-    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "90", suffix: " °" },
+    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "1", suffix: " °" },
     { key: "direction", send: "direction", label: "Direction", type: "select",
       options: [["1", "Forward"], ["0", "Reverse"]] },
     { key: "speed", send: "speed", label: "Speed", type: "number", min: 0, max: 5000, suffix: " mm/s" },
@@ -386,36 +398,43 @@ const PUSH_BUTTON_COLORS = {
 };
 
 function sendSetProperty(tagName, property, value) {
-  ws.send(JSON.stringify({ action: "set_property", tag_name: tagName, property, value }));
+  send({ action: "set_property", tag_name: tagName, property, value });
 }
 
-function selectComponent(tagName) {
-  selectedTag = tagName;
-  for (const [tag, el] of Object.entries(elements)) {
-    el.classList.toggle("selected", tag === tagName);
+function selectComponent(tagName, additive = false) {
+  if (suppressSelection) return;
+  if (additive) {
+    if (selectedTags.has(tagName)) selectedTags.delete(tagName);
+    else selectedTags.add(tagName);
+  } else {
+    selectedTags.clear();
+    selectedTags.add(tagName);
   }
-  document.body.tabIndex = -1;
-  document.body.focus({ preventScroll: true });
+
+  selectedTag = selectedTags.size === 1 ? [...selectedTags][0] : null;
+
+  for (const [tag, el] of Object.entries(elements)) {
+    el.classList.toggle("selected", selectedTags.has(tag));
+  }
+
   renderPropertyPanel();
   renderComponentsList(latestState);
 }
 
 function deselectAll() {
+  selectedTags.clear();
   selectedTag = null;
-  for (const el of Object.values(elements)) {
-    el.classList.remove("selected");
-  }
+  for (const el of Object.values(elements)) el.classList.remove("selected");
   renderPropertyPanel();
   renderComponentsList(latestState);
 }
 
-// Clicking empty canvas space (not a component) clears the selection,
-// which also hides the now-unselected components' .tag labels.
-canvasViewport.addEventListener("click", (e) => {
-  if (e.target === canvas || e.target === canvasViewport) deselectAll();
-});
-
 function renderPropertyPanel() {
+  if (selectedTags.size > 1) {
+    propertyBody.innerHTML = '<p class="empty">Multiple components selected.</p>';
+    return;
+  }
+
   const obj = selectedTag ? latestState[selectedTag] : null;
 
   if (!obj) {
@@ -553,10 +572,9 @@ function renderPropertyPanel() {
   });
 }
 
-const ws = new WebSocket(`ws://${location.host}/ws`);
 
 
-ws.onmessage = (event) => {
+setMessageHandler((event) => {
   const msg = JSON.parse(event.data);
 
   // One-off reply to a "plc_validate" command, not part of the
@@ -597,16 +615,16 @@ ws.onmessage = (event) => {
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
   updateRuntimeAlarmBar();
-};
+});
 
 function sendSetPoint(tagName, point, value) {
-  ws.send(JSON.stringify({ action: "set_point", tag_name: tagName, point, value }));
+  send({ action: "set_point", tag_name: tagName, point, value });
 }
 
 function sendAddComponent(componentType, x, y) {
   pushHistory();
   markDirty();
-  ws.send(JSON.stringify({ action: "add_component", component_type: componentType, x, y }));
+  send({ action: "add_component", component_type: componentType, x, y });
 }
 
 let currentFileHandle = null;
@@ -648,7 +666,7 @@ function downloadProjectBlob(data) {
 }
 
 function requestProjectSave() {
-  ws.send(JSON.stringify({ action: "save_project" }));
+  send({ action: "save_project" });
 }
 
 function saveProjectAsClassic() {
@@ -718,7 +736,7 @@ document.getElementById("open-project-input").addEventListener("change", async (
     markClean();
     deselectAll();
     applyLoadedConnectionSettings(data.plc_connection);
-    ws.send(JSON.stringify({ action: "load_project", data }));
+    send({ action: "load_project", data });
   };
   reader.readAsText(file);
   e.target.value = ""; // allow re-opening the same file later
@@ -729,17 +747,17 @@ document.getElementById("reset-view-btn").addEventListener("click", () => {
   if (!confirm("Remove all components from the simulation area?")) return;
   pushHistory();
   markDirty();
-  ws.send(JSON.stringify({ action: "reset_view" }));
+  send({ action: "reset_view" });
 });
 
 function sendDeleteComponent(tagName) {
   if (!tagName) return;
   pushHistory();
   markDirty();
-  ws.send(JSON.stringify({
+  send({
     action: "delete_component",
     tag_name: tagName
-  }));
+  });
 }
 
 // ---------- Rendering ----------
@@ -751,17 +769,15 @@ function render(state) {
       el.remove();
       delete elements[tagName];
 
-      if (selectedTag === tagName) {
-        selectedTag = null;
-        propertyBody.innerHTML =
-          '<p class="empty">Select a component to view its properties.</p>';
-      }
+      selectedTags.delete(tagName);
+      if (selectedTag === tagName) selectedTag = null;
+      renderPropertyPanel();
     }
   }
 
   // Create/update components that exist in the simulation.
   for (const [tagName, obj] of Object.entries(state)) {
-    if (obj.type === "conveyor") renderConveyor(tagName, obj);
+    if (obj.type === "conveyor") renderConveyor(tagName, obj, { getOrCreate, selectComponent, isDesignMode, sendSetPoint, getLatestState: () => latestState });
     else if (obj.type === "cylinder") renderCylinder(tagName, obj);
     else if (obj.type === "motor") renderMotor(tagName, obj);
     else if (obj.type === "sensor") renderSensor(tagName, obj);
@@ -856,7 +872,7 @@ function renderComponentsList(state) {
   for (const li of list.children) {
     const tagName = li.dataset.tag;
     const obj = state[tagName];
-    li.classList.toggle("selected", tagName === selectedTag);
+    li.classList.toggle("selected", selectedTags.has(tagName));
 
     if (obj) {
       const active = isComponentActive(obj);
@@ -874,7 +890,7 @@ document.getElementById("components-list").addEventListener("mousedown", functio
     li = li.parentNode;
   }
   if (!li || li === this) return;
-  selectComponent(li.getAttribute("data-tag"));
+  selectComponent(li.getAttribute("data-tag"), e.ctrlKey);
 });
 
 // Refreshes only the read-only status rows for the selected component
@@ -910,32 +926,38 @@ function enableComponentDragging(el, tagName) {
   let moved = false;
   let startX = 0;
   let startY = 0;
-  let originX = 0;
-  let originY = 0;
+  let origins = new Map();
 
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
 
-    if (!isDesignMode()) {
-      return;
+    const obj = latestState[tagName];
+    if (!obj) return;
+
+    // Ctrl+click toggles selection. Do not start a component drag for the
+    // selection gesture until the pointer actually moves.
+    if (e.ctrlKey) {
+      selectComponent(tagName, true);
+    } else if (!selectedTags.has(tagName)) {
+      selectComponent(tagName);
+    }
+    el.dataset.selectionHandled = "true";
+
+    origins = new Map();
+    for (const tag of selectedTags) {
+      const selectedObj = latestState[tag];
+      if (selectedObj) {
+        origins.set(tag, { x: selectedObj.x, y: selectedObj.y });
+      }
     }
 
     dragging = true;
     moved = false;
-
     startX = e.clientX;
     startY = e.clientY;
 
-    const obj = latestState[tagName];
-    if (!obj) return;
-
-    originX = obj.x;
-    originY = obj.y;
-
     el.setPointerCapture(e.pointerId);
     el.classList.add("dragging");
-
-    selectComponent(tagName);
   });
 
   el.addEventListener("pointermove", (e) => {
@@ -945,26 +967,30 @@ function enableComponentDragging(el, tagName) {
     const dy = e.clientY - startY;
 
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-      if (!moved) pushHistory();
-      moved = true;
+      if (!moved) {
+        if (isDesignMode()) pushHistory();
+        moved = true;
+      }
     }
 
-    // Convert mouse movement from screen pixels
-    // back into simulation coordinates.
-    const newX = Math.round(
-      originX + dx / simulationZoom
-    );
+    if (!moved) return;
 
-    const newY = Math.round(
-      originY + dy / simulationZoom
-    );
+    for (const [tag, origin] of origins.entries()) {
+      const obj = latestState[tag];
+      const component = elements[tag];
+      if (!obj || !component) continue;
 
-    el.style.left = `${newX}px`;
-    el.style.top = `${newY}px`;
+      const newX = Math.round(origin.x + dx / simulationZoom);
+      const newY = Math.round(origin.y + dy / simulationZoom);
 
-    markDirty();
-    sendSetProperty(tagName, "x", newX);
-    sendSetProperty(tagName, "y", newY);
+      component.style.left = `${newX}px`;
+      component.style.top = `${newY}px`;
+
+      sendSetProperty(tag, "x", newX);
+      sendSetProperty(tag, "y", newY);
+    }
+
+    if (isDesignMode()) markDirty();
   });
 
   el.addEventListener("pointerup", (e) => {
@@ -973,59 +999,63 @@ function enableComponentDragging(el, tagName) {
     dragging = false;
     el.classList.remove("dragging");
 
-    try {
-      el.releasePointerCapture(e.pointerId);
-    } catch (_) {}
+    try { el.releasePointerCapture(e.pointerId); } catch (_) {}
 
     if (moved) {
       e.preventDefault();
       el.dataset.justDragged = "true";
-
-      setTimeout(() => {
-        delete el.dataset.justDragged;
-      }, 0);
+      setTimeout(() => { delete el.dataset.justDragged; }, 0);
     }
+  });
+
+  el.addEventListener("pointercancel", () => {
+    dragging = false;
+    el.classList.remove("dragging");
   });
 }
 
-// Nudge the selected component with the arrow keys.
-// Hold Shift for a bigger step.
+// ---------- Arrow-key nudging (Design mode only) ----------
+// Moves every selected component by 1px, or 10px with Shift held.
+// Ignored while the user is typing in a text field (property panel,
+// name input, etc.) so arrow keys still work for cursor movement there.
+
+const NUDGE_STEP = 1;
+const NUDGE_STEP_FAST = 10;
+
 document.addEventListener("keydown", (e) => {
-  if (!isDesignMode()) return;
-  if (!selectedTag) return;
+  if (!isDesignMode() || selectedTags.size === 0) return;
+
+  const dirs = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  const dir = dirs[e.key];
+  if (!dir) return;
 
   const active = document.activeElement;
-  if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) {
-    return; // don't hijack arrow keys while typing in a field
-  }
-
-  const STEP = e.shiftKey ? 10 : 1;
-  let dx = 0, dy = 0;
-
-  switch (e.key) {
-    case "ArrowUp": dy = -STEP; break;
-    case "ArrowDown": dy = STEP; break;
-    case "ArrowLeft": dx = -STEP; break;
-    case "ArrowRight": dx = STEP; break;
-    default: return;
-  }
+  const tag = active && active.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (active && active.isContentEditable)) return;
 
   e.preventDefault();
+
+  const step = e.shiftKey ? NUDGE_STEP_FAST : NUDGE_STEP;
+  const [dx, dy] = [dir[0] * step, dir[1] * step];
+
   pushHistory();
-  markDirty(); 
 
-  const obj = latestState[selectedTag];
-  const el = elements[selectedTag];
-  if (!obj || !el) return;
+  for (const t of selectedTags) {
+    const obj = latestState[t];
+    const component = elements[t];
+    if (!obj || !component) continue;
 
-  const newX = Math.round(obj.x + dx);
-  const newY = Math.round(obj.y + dy);
+    const newX = Math.round(obj.x + dx);
+    const newY = Math.round(obj.y + dy);
 
-  el.style.left = `${newX}px`;
-  el.style.top = `${newY}px`;
+    component.style.left = `${newX}px`;
+    component.style.top = `${newY}px`;
 
-  sendSetProperty(selectedTag, "x", newX);
-  sendSetProperty(selectedTag, "y", newY);
+    sendSetProperty(t, "x", newX);
+    sendSetProperty(t, "y", newY);
+  }
+
+  markDirty();
 });
 
 function getOrCreate(tagName, className, innerBuilder, onClick) {
@@ -1043,7 +1073,17 @@ function getOrCreate(tagName, className, innerBuilder, onClick) {
         return;
       }
 
+      if (el.dataset.selectionHandled === "true") {
+        delete el.dataset.selectionHandled;
+      } else {
+        selectComponent(tagName, e.ctrlKey);
+      }
+
+      // Component-specific click actions may call selectComponent() themselves;
+      // suppress that secondary selection change for Ctrl+click.
+      suppressSelection = e.ctrlKey;
       onClick();
+      suppressSelection = false;
     });
 
     enableComponentDragging(el, tagName);
@@ -1053,65 +1093,6 @@ function getOrCreate(tagName, className, innerBuilder, onClick) {
   }
 
   return el;
-}
-
-function renderConveyor(tagName, c) {
-  const el = getOrCreate(
-    tagName,
-    "conveyor-ui",
-    (container) => {
-      // No fixed number of .box-ui elements up front -- box_count can
-      // be anywhere from 1 up to max_box_count, so boxes are
-      // created/removed to match box_positions.length on every render.
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-    },
-    () => {
-      selectComponent(tagName);
-      if (isDesignMode()) return;
-      sendSetPoint(tagName, "running", latestState[tagName]?.running ? 0 : 1);
-    }
-  );
-
-  el.style.left = `${c.x}px`;
-  el.style.top = `${c.y}px`;
-  el.style.width = `${c.width}px`;
-  el.style.height = `${c.height}px`;
-  el.style.transform = `rotate(${c.rotation || 0}deg)`;
-  el.style.zIndex = c.layer || 0;
-  el.classList.toggle("running", !!c.running);
-  el.classList.toggle("reverse", !c.direction_forward);
-
-  const boxHeight = c.box_height ?? Math.min(24, c.height - 4);
-  const travel = Math.max(0, c.width - c.box_width);
-  const positions = c.box_positions && c.box_positions.length ? c.box_positions : [0];
-  const tagEl = el.querySelector(".tag");
-
-  // Reconcile the number of .box-ui elements with the current number
-  // of box positions (box_count can change live via the Properties
-  // panel, or the count can shift as boxes spawn/exit each tick).
-  let boxEls = Array.from(el.querySelectorAll(".box-ui"));
-  while (boxEls.length < positions.length) {
-    const box = document.createElement("div");
-    box.className = "box-ui";
-    el.insertBefore(box, tagEl);
-    boxEls.push(box);
-  }
-  while (boxEls.length > positions.length) {
-    boxEls.pop().remove();
-  }
-
-  positions.forEach((rawPos, i) => {
-    const pos = Math.min(rawPos, travel);
-    const box = boxEls[i];
-    box.style.left = `${pos}px`;
-    box.style.top = `${(c.height - boxHeight) / 2}px`;
-    box.style.width = `${c.box_width}px`;
-    box.style.height = `${boxHeight}px`;
-  });
-
-  tagEl.textContent = `${tagName}  running=${c.running}  speed=${c.speed}`;
 }
 
 function renderCylinder(tagName, cyl) {
@@ -1208,6 +1189,10 @@ function renderMotor(tagName, c) {
 
   el.classList.toggle("running", !!c.running);
   el.classList.toggle("reverse", !c.direction_forward);
+  // Belt direction is rendered from the backend simulation phase.
+  // There is deliberately no independent CSS animation: boxes, belt
+  // markings, and direction therefore share one source of truth.
+  el.style.setProperty("--belt-phase", `${-(c.belt_phase || 0)}px`);
 
   const fanLabel = el.querySelector(".motor-fan-label");
   fanLabel.textContent = c.direction_forward ? "FWD" : "REV";
@@ -1579,16 +1564,16 @@ document.getElementById("plc-connect-btn").addEventListener("click", () => {
     };
   }
 
-  ws.send(JSON.stringify({ action: "plc_connect", backend, params }));
+  send({ action: "plc_connect", backend, params });
 });
 
 document.getElementById("plc-disconnect-btn").addEventListener("click", () => {
-  ws.send(JSON.stringify({ action: "plc_disconnect" }));
+  send({ action: "plc_disconnect" });
 });
 
 document.getElementById("plc-pause-btn").addEventListener("click", () => {
   const action = latestPlc.paused ? "plc_resume" : "plc_pause";
-  ws.send(JSON.stringify({ action }));
+  send({ action });
 });
 
 document.getElementById("plc-connect-bar-title").addEventListener("click", (e) => {
@@ -1806,12 +1791,12 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
 
         if (!value) return;
 
-        ws.send(JSON.stringify({
+        send({
           action: "plc_force",
           tag_name: row.tag,
           io_point: row.point,
           value,
-        }));
+        });
       };
 
       forceInput.addEventListener("keydown", (e) => {
@@ -1969,11 +1954,11 @@ function applyAllMappings() {
     const value = cells.nodeInput.value.trim();
     if (value) mappings.push({ object_tag: tag, io_point: point, plc_node: value });
   }
-  ws.send(JSON.stringify({ action: "plc_set_mapping", mappings }));
+  send({ action: "plc_set_mapping", mappings });
 }
 
 document.getElementById("mapping-validate-btn").addEventListener("click", () => {
-  ws.send(JSON.stringify({ action: "plc_validate" }));
+  send({ action: "plc_validate" });
 });
 
 function showValidationResult(problems) {
@@ -2128,7 +2113,7 @@ document.getElementById("s7-import-parse-btn").addEventListener("click", () => {
       if (ns) payload.namespace = parseInt(ns, 10);
       if (dbName) payload.db_name = dbName;
     }
-    ws.send(JSON.stringify(payload));
+    send(payload);
     return;
   }
 
@@ -2145,7 +2130,7 @@ document.getElementById("s7-import-parse-btn").addEventListener("click", () => {
     if (dbNumRaw) payload.db_number = parseInt(dbNumRaw, 10);
   }
 
-  ws.send(JSON.stringify(payload));
+  send(payload);
 });
 
 let _pendingImportTags = [];
@@ -2311,7 +2296,7 @@ function renderOfflineTagPickerList(filterText) {
 }
 
 function requestOpcuaBrowse(nodeId) {
-  ws.send(JSON.stringify({ action: "plc_browse_opcua", node_id: nodeId }));
+  send({ action: "plc_browse_opcua", node_id: nodeId });
 }
 
 function handleOpcuaBrowseResult(result) {
@@ -2393,13 +2378,107 @@ function applySimulationTransform() {
     `${simulationPanX}px ${simulationPanY}px`;
 }
 
+// ---------- Ctrl+drag multi-selection marquee ----------
+
+function createSelectionMarquee(e) {
+  const rect = canvasViewport.getBoundingClientRect();
+  selectionMarquee = document.createElement("div");
+  selectionMarquee.className = "selection-marquee";
+  selectionMarquee.style.left = `${e.clientX - rect.left}px`;
+  selectionMarquee.style.top = `${e.clientY - rect.top}px`;
+  selectionMarquee.style.width = "0px";
+  selectionMarquee.style.height = "0px";
+  canvasViewport.appendChild(selectionMarquee);
+
+  marqueeStartX = e.clientX;
+  marqueeStartY = e.clientY;
+  marqueeAdditive = true;
+}
+
+function updateSelectionMarquee(e) {
+  if (!selectionMarquee) return;
+
+  const rect = canvasViewport.getBoundingClientRect();
+  const x1 = marqueeStartX - rect.left;
+  const y1 = marqueeStartY - rect.top;
+  const x2 = e.clientX - rect.left;
+  const y2 = e.clientY - rect.top;
+
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const width = Math.abs(x2 - x1);
+  const height = Math.abs(y2 - y1);
+
+  selectionMarquee.style.left = `${left}px`;
+  selectionMarquee.style.top = `${top}px`;
+  selectionMarquee.style.width = `${width}px`;
+  selectionMarquee.style.height = `${height}px`;
+}
+
+function finishSelectionMarquee(e) {
+  if (!selectionMarquee) return;
+
+  const box = selectionMarquee.getBoundingClientRect();
+  const selected = new Set(selectedTags);
+
+  // A Ctrl-drag is additive: every component touched by the marquee is
+  // added to the current selection. Normal empty-area dragging remains pan.
+  for (const [tagName, el] of Object.entries(elements)) {
+    const componentBox = el.getBoundingClientRect();
+    const intersects =
+      componentBox.right >= box.left &&
+      componentBox.left <= box.right &&
+      componentBox.bottom >= box.top &&
+      componentBox.top <= box.bottom;
+
+    if (intersects) selected.add(tagName);
+  }
+
+  selectionMarquee.remove();
+  selectionMarquee = null;
+
+  selectedTags = selected;
+  selectedTag = selectedTags.size === 1 ? [...selectedTags][0] : null;
+
+  for (const [tag, el] of Object.entries(elements)) {
+    el.classList.toggle("selected", selectedTags.has(tag));
+  }
+
+  renderPropertyPanel();
+  renderComponentsList(latestState);
+}
+
+function cancelSelectionMarquee(e) {
+  if (!selectionMarquee) return;
+  selectionMarquee.remove();
+  selectionMarquee = null;
+}
+
 // ---------- Simulation: pan view by dragging empty area ----------
 
 canvasViewport.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
 
-  // Clicking a component is handled by the component's own drag logic.
+  // Ctrl + left-drag on empty simulation space starts a selection marquee.
+  // This takes precedence over panning, while Ctrl + click on a component
+  // continues to toggle that individual component.
+  if (e.ctrlKey && !e.target.closest(".component")) {
+    createSelectionMarquee(e);
+    canvasViewport.setPointerCapture(e.pointerId);
+    canvasViewport.style.cursor = "crosshair";
+    return;
+  }
+
+  // Clicking empty simulation space clears the current selection.
+  // Keep panning behavior unchanged: the same drag can still pan the view.
   if (e.target.closest(".component")) return;
+  selectedTags.clear();
+  selectedTag = null;
+  for (const el of Object.values(elements)) {
+    el.classList.remove("selected");
+  }
+  renderPropertyPanel();
+  renderComponentsList(latestState);
 
   panning = true;
 
@@ -2414,6 +2493,11 @@ canvasViewport.addEventListener("pointerdown", (e) => {
 });
 
 canvasViewport.addEventListener("pointermove", (e) => {
+  if (selectionMarquee) {
+    updateSelectionMarquee(e);
+    return;
+  }
+
   if (!panning) return;
 
   const dx = e.clientX - panStartX;
@@ -2426,6 +2510,15 @@ canvasViewport.addEventListener("pointermove", (e) => {
 });
 
 function stopSimulationPanning(e) {
+  if (selectionMarquee) {
+    finishSelectionMarquee(e);
+    try {
+      canvasViewport.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    canvasViewport.style.cursor = "grab";
+    return;
+  }
+
   if (!panning) return;
 
   panning = false;
@@ -2437,8 +2530,25 @@ function stopSimulationPanning(e) {
   canvasViewport.style.cursor = "grab";
 }
 
+function cancelSimulationInteraction(e) {
+  if (selectionMarquee) {
+    cancelSelectionMarquee(e);
+    try {
+      canvasViewport.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    canvasViewport.style.cursor = "grab";
+  }
+  if (panning) {
+    panning = false;
+    try {
+      canvasViewport.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    canvasViewport.style.cursor = "grab";
+  }
+}
+
 canvasViewport.addEventListener("pointerup", stopSimulationPanning);
-canvasViewport.addEventListener("pointercancel", stopSimulationPanning);
+canvasViewport.addEventListener("pointercancel", cancelSimulationInteraction);
 
 canvasViewport.style.cursor = "grab";
 

@@ -1,5 +1,6 @@
 # core/components/conveyor.py
 from core.sim_object import SimObject
+from core.io import Signal
 
 MIN_WIDTH = 30  # matches ui/simulation_view.py's MIN_WIDTH in the original app
 
@@ -38,6 +39,7 @@ class ConveyorBehavior(SimObject):
         self.box_count = self.DEFAULT_BOX_COUNT
         self.box_positions = [0.0]
         self._spawn_accumulator = 0.0
+        self._belt_phase = 0.0
 
     # ---------- Geometry (design-time, Properties panel) ----------
 
@@ -169,6 +171,7 @@ class ConveyorBehavior(SimObject):
         dt_sec = dt_ms / 1000.0
         direction = 1.0 if self.direction_forward else -1.0
         step = self.speed * self.ANIM_SPEED_SCALE * dt_sec * direction
+        self._belt_phase = (self._belt_phase + step) % 43.0
 
         travel = max(0.0, self.width - self.box_width)
         spawn_pos = 0.0 if self.direction_forward else travel
@@ -208,6 +211,14 @@ class ConveyorBehavior(SimObject):
 
     # ---------- PLC I/O mapping (copied verbatim) ----------
 
+    def get_io_signals(self):
+        return [
+            Signal("speed", self.get_speed, self.set_speed, float, "Conveyor speed"),
+            Signal("running", self.get_running, self.set_running, bool, "Run command"),
+            Signal("running_status", self.get_running_status, None, int, "Conveyor running status"),
+            Signal("direction", self.get_direction, self.set_direction, bool, "Forward direction command"),
+        ]
+
     def get_plc_io_points(self):
         return {
             "speed": (self.get_speed, self.set_speed),
@@ -234,5 +245,6 @@ class ConveyorBehavior(SimObject):
             "height": self.height,
             "max_box_height": self.get_max_box_height(),
             "max_box_count": self.get_max_box_count(),
+            "belt_phase": self._belt_phase,
         })
         return state

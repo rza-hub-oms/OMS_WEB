@@ -1,4 +1,5 @@
 from core.sim_object import SimObject
+from core.io import Signal
 
 
 class MotorBehavior(SimObject):
@@ -134,6 +135,14 @@ class MotorBehavior(SimObject):
     # ------------------------------------------------------------------
     # PLC I/O
     # ------------------------------------------------------------------
+
+    def get_io_signals(self):
+        return [
+            Signal("speed", self.get_speed, self.set_speed, float, "Motor speed"),
+            Signal("running", self.get_running, self.set_running, bool, "Run command"),
+            Signal("running_status", self.get_running_status, None, int, "Motor running status"),
+            Signal("direction", self.get_direction, self.set_direction, bool, "Forward direction command"),
+        ]
 
     def get_plc_io_points(self):
         return {
