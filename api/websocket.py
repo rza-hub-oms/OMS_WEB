@@ -99,6 +99,28 @@ def _plc_status(session: ProjectSession) -> dict:
     what MappingPanel._scan_scene() + _refresh_live_values() pull from
     sim_view/plc_sync in the original desktop app."""
     sync = session.plc_sync
+    raw_values = sync.get_read_values() if sync else {}
+
+    # Attach the latest raw PLC value directly to each mapping row. This
+    # avoids making the browser reconstruct the relationship between a
+    # mapping row and the PLC read cache, and guarantees the monitor uses
+    # exactly the same address string the mapping table uses.
+    mapping = []
+    for row in session.scene.plc_mapping:
+        item = dict(row)
+        node = item.get("plc_node", "")
+        node_key = node.strip() if isinstance(node, str) else node
+        if node in raw_values:
+            item["live_value"] = raw_values[node]
+            item["live_value_available"] = True
+        elif node_key in raw_values:
+            item["live_value"] = raw_values[node_key]
+            item["live_value_available"] = True
+        else:
+            item["live_value"] = None
+            item["live_value_available"] = False
+        mapping.append(item)
+
     return {
         "available_backends": AVAILABLE_BACKENDS,
         "address_format_hints": ADDRESS_FORMAT_HINTS,
@@ -108,8 +130,11 @@ def _plc_status(session: ProjectSession) -> dict:
         "comms_healthy": bool(sync and sync._comms_healthy) if sync else True,
         "last_error": (sync.last_error if sync else session.last_connect_error),
         "event_log": list(sync.event_log) if sync else [],
-        "mapping": session.scene.plc_mapping,
+        "mapping": mapping,
         "signals": session.scene.signal_catalog(),
+        # Keep the raw cache available for diagnostics and future monitor
+        # features as well.
+        "values": raw_values,
     }
 
 

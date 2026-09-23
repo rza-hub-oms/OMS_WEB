@@ -614,6 +614,7 @@ setMessageHandler((event) => {
   render(latestState);
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
+  renderPlcMonitor(latestPlc, latestState);
   updateRuntimeAlarmBar();
 });
 
@@ -1655,6 +1656,124 @@ function updateNodeHint(plc) {
   }
 }
 
+// ---------- PLC monitor ----------
+
+function renderPlcMonitor(plc, state) {
+  const tbody = document.getElementById("monitor-tbody");
+  if (!tbody) return;
+
+  const filter = (document.getElementById("monitor-filter")?.value || "")
+    .toLowerCase()
+    .trim();
+
+  const mappingByKey = {};
+  for (const m of plc.mapping || []) {
+    mappingByKey[`${m.object_tag}|${m.io_point}`] = m;
+  }
+
+  let total = 0;
+  let visible = 0;
+  tbody.innerHTML = "";
+
+  for (const tag of Object.keys(state).sort()) {
+    const obj = state[tag];
+    if (!obj._io_points) continue;
+
+    for (const point of Object.keys(obj._io_points).sort()) {
+      const key = `${tag}|${point}`;
+      const mapping = mappingByKey[key];
+      if (!mapping) continue;
+
+      const node = mapping.plc_node || "";
+      if (!node) continue;
+
+      total++;
+      const direction = obj._io_points[point] ? "PLC → OMS" : "OMS → PLC";
+
+      // Always show a value when the signal exists.  For PLC -> OMS,
+      // obj[point] is the value that the PLC polling layer has already
+      // applied to the live simulation object, so it is the most
+      // reliable browser-side representation of what the simulation is
+      // actually receiving.  Prefer the raw PLC cache when it is present,
+      // then fall back to the mapped row and finally the live object.
+      const rawValue = plc.values && Object.prototype.hasOwnProperty.call(plc.values, node)
+        ? plc.values[node]
+        : undefined;
+      const value = rawValue !== undefined
+        ? rawValue
+        : (mapping.live_value_available ? mapping.live_value : obj[point]);
+      const haystack = `${tag} ${point} ${node} ${direction} ${value ?? ""}`.toLowerCase();
+
+      if (filter && !haystack.includes(filter)) continue;
+      visible++;
+
+      const card = document.createElement("div");
+      card.className = "monitor-card";
+
+      const objectCell = document.createElement("div");
+      const objectName = document.createElement("div");
+      objectName.className = "monitor-object";
+      objectName.textContent = tag;
+      const pointName = document.createElement("div");
+      pointName.className = "monitor-point";
+      pointName.textContent = point;
+      objectCell.append(objectName, pointName);
+
+      const nodeCell = document.createElement("div");
+      nodeCell.className = "monitor-node";
+      nodeCell.textContent = node;
+
+      const directionCell = document.createElement("div");
+      directionCell.className = "monitor-direction";
+      directionCell.textContent = direction;
+
+      const valueCell = document.createElement("div");
+      valueCell.className = "monitor-value";
+      valueCell.textContent = value === undefined ? "—" : String(value);
+
+      card.append(objectCell, nodeCell, directionCell, valueCell);
+      tbody.appendChild(card);
+    }
+  }
+
+  const dot = document.getElementById("monitor-status-dot");
+  const status = document.getElementById("monitor-status-text");
+  const count = document.getElementById("monitor-signal-count");
+
+  dot?.classList.toggle("connected", !!plc.connected);
+  dot?.classList.toggle("unhealthy", !!plc.connected && !plc.comms_healthy);
+  dot?.classList.toggle("paused", !!plc.connected && !!plc.paused);
+
+  if (status) {
+    status.textContent = !plc.connected
+      ? "PLC not connected"
+      : plc.paused
+        ? `Connected (${plc.backend}) — Paused`
+        : plc.comms_healthy
+          ? `Connected (${plc.backend})`
+          : `Connected (${plc.backend}) — comms lost`;
+  }
+
+  if (count) {
+    count.textContent = filter
+      ? `${visible} / ${total} signals`
+      : `${total} signals`;
+  }
+
+  if (visible === 0) {
+    const empty = document.createElement("div");
+    empty.className = "monitor-empty";
+    empty.textContent = total === 0
+      ? "No mapped signals."
+      : "No signals match the filter.";
+    tbody.appendChild(empty);
+  }
+}
+
+document.getElementById("monitor-filter")?.addEventListener("input", () => {
+  renderPlcMonitor(latestPlc, latestState);
+});
+
 // ---------- PLC mapping table ----------
 
 let mappingRowsKey = null;
@@ -2208,7 +2327,7 @@ function openTagPicker(nodeInput) {
   // in the Backend dropdown -- offline tag picking doesn't need a
   // live connection at all, so there's no reason to force one just
   // to open the picker.
-  const backend = latestPlc.backend || document.getElementById("plc-backend-select").value;
+  const backend = document.getElementById("plc-backend-select").value;
 
   if (backend === "s7") {
     tagPickerMode = "s7";
@@ -2220,7 +2339,7 @@ function openTagPicker(nodeInput) {
     document.getElementById("tag-picker-filter").focus();
   } else if (backend === "asyncua" || backend === "opcua") {
     document.getElementById("tag-picker-filter").value = "";
-    if (latestPlc.connected) {
+    if (latestPlc.connected && importedTags.opcua.length === 0) {
       // Live browse -- always the most accurate source when it's available.
       tagPickerMode = "opcua-live";
       document.getElementById("tag-picker-title").textContent = "Browse OPC UA Server (live)";

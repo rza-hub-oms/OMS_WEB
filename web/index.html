@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>OMS Web Prototype</title>
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=10" />
 </head>
 <body>
   <h1>OMS Web Prototype</h1>
@@ -123,6 +123,7 @@
       <div class="tabs">
         <button type="button" class="tab active" data-tab="properties">Properties</button>
         <button type="button" class="tab" data-tab="plc">PLC Mapping</button>
+        <button type="button" class="tab" data-tab="monitor">PLC Monitor</button>
         <button type="button" class="tab" data-tab="components">Components</button>
       </div>
 
@@ -163,6 +164,25 @@
             <span>Force</span>
           </div>
           <div id="mapping-tbody" class="mapping-card-list"></div>
+        </div>
+      </div>
+      <div id="monitor-tab" class="tab-panel" data-panel="monitor">
+        <div class="monitor-summary">
+          <div class="monitor-status">
+            <span id="monitor-status-dot" class="status-dot"></span>
+            <span id="monitor-status-text">PLC not connected</span>
+          </div>
+          <span id="monitor-signal-count">0 signals</span>
+        </div>
+        <input id="monitor-filter" type="text" placeholder="Filter by object, I/O point, or PLC address...">
+        <div id="monitor-table-wrap">
+          <div class="monitor-table-head" aria-hidden="true">
+            <span>Object / I/O</span>
+            <span>PLC address / node</span>
+            <span>Direction</span>
+            <span>Value</span>
+          </div>
+          <div id="monitor-tbody" class="monitor-card-list"></div>
         </div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
@@ -265,6 +285,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=8"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>

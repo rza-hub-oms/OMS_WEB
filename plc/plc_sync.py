@@ -341,6 +341,15 @@ class PlcSyncBase:
         # a write fails), so every access goes through self._lock.
         self._last_written = {}
 
+    def get_read_values(self):
+        """Return a thread-safe snapshot of the latest values actually read
+        from the PLC, keyed by PLC node/address. The web monitor uses this
+        directly so it can display the real PLC value independently of the
+        simulated object state.
+        """
+        with self._lock:
+            return dict(self._read_cache)
+
     # ---------- Backend hooks (subclasses implement/override) ----------
 
     def _make_client(self):
