@@ -40,20 +40,40 @@ export function renderConveyor(tagName, c, { getOrCreate, selectComponent, isDes
   // Reconcile the number of .box-ui elements with the current number
   // of box positions (box_count can change live via the Properties
   // panel, or the count can shift as boxes spawn/exit each tick).
-  let boxEls = Array.from(el.querySelectorAll(".box-ui"));
-  while (boxEls.length < positions.length) {
-    const box = document.createElement("div");
-    box.className = "box-ui";
-    el.insertBefore(box, tagEl);
-    boxEls.push(box);
+  // Keep each DOM box element bound to the SAME physical box between
+  // renders. Boxes can vanish from the head (belt end) OR the middle
+  // (a cylinder deletes one), and new ones spawn at the tail, so
+  // matching by index would hand a removed box's element to its
+  // neighbour and make the neighbours visibly slide back. Instead, walk
+  // the previous and new lists in order and pair a box with its previous
+  // self when it moved only a small step along the belt's direction.
+  const dir = c.direction_forward ? 1 : -1;
+  const maxStep = Math.max(2, c.box_width / 2);
+  const prev = el._boxState || [];          // [{pos, node}]
+  const next = [];
+  let pi = 0;
+  for (const rawPos of positions) {
+    let match = -1;
+    for (let k = pi; k < prev.length; k++) {
+      const delta = (rawPos - prev[k].pos) * dir;
+      if (delta >= -0.01 && delta <= maxStep) { match = k; break; }
+    }
+    if (match >= 0) {
+      for (let k = pi; k < match; k++) prev[k].node.remove();   // vanished
+      next.push({ pos: rawPos, node: prev[match].node });
+      pi = match + 1;
+    } else {
+      const node = document.createElement("div");                // newly spawned
+      node.className = "box-ui";
+      el.insertBefore(node, tagEl);
+      next.push({ pos: rawPos, node });
+    }
   }
-  while (boxEls.length > positions.length) {
-    boxEls.pop().remove();
-  }
+  for (let k = pi; k < prev.length; k++) prev[k].node.remove();  // vanished at tail
+  el._boxState = next;
 
-  positions.forEach((rawPos, i) => {
+  next.forEach(({ pos: rawPos, node: box }) => {
     const pos = Math.min(rawPos, travel);
-    const box = boxEls[i];
     box.style.left = `${pos}px`;
     box.style.top = `${(c.height - boxHeight) / 2}px`;
     box.style.width = `${c.box_width}px`;

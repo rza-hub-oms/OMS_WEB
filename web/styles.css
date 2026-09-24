@@ -1712,3 +1712,356 @@ button:hover { background: #25445c; border-color: #3488c7; }
   color: #718497;
   text-align: center;
 }
+
+
+/* =====================================================================
+   MODERN THEME LAYER  (v11)
+   Pure visual overrides -- no markup or JS changes required.
+   Delete everything below this line to return to the previous look.
+   ===================================================================== */
+
+:root {
+  --bg: #080d14;
+  --bg-glow: radial-gradient(1200px 500px at 15% -10%, #12304a55, transparent 60%),
+             radial-gradient(900px 500px at 100% 0%, #1b2a5a33, transparent 55%);
+  --panel: #0f1720;
+  --panel2: #131d28;
+  --edge: #223142;
+  --edge-soft: #1a2734;
+  --blue: #3aa0ff;
+  --blue-soft: #3aa0ff26;
+  --green: #34d399;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 0 #ffffff08 inset, 0 8px 24px #00000055;
+  --font: Inter, "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+}
+
+body {
+  background: var(--bg) var(--bg-glow) no-repeat fixed;
+  font: 13px/1.45 var(--font);
+  padding: 16px 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+h1::before {
+  content: "";
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--blue), #7c5cff);
+  box-shadow: 0 0 12px #3aa0ff88;
+}
+
+/* ---------- Panels ---------- */
+#plc-connect-bar,
+#dock,
+#properties,
+#mode-bar {
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #101922, var(--panel));
+  box-shadow: var(--shadow);
+}
+
+.panel-title {
+  color: #7f93a8;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  border-bottom: 1px solid var(--edge-soft);
+}
+
+/* ---------- Buttons ---------- */
+button {
+  background: #182431;
+  border: 1px solid #2b3c4e;
+  border-radius: var(--radius-sm);
+  transition: background .15s ease, border-color .15s ease, transform .08s ease, box-shadow .15s ease;
+}
+button:hover { background: #1f3346; border-color: #3d6f99; }
+button:active { transform: translateY(1px); }
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.apply {
+  background: linear-gradient(180deg, #1f9d68, #16805a);
+  border-color: #2fbf85;
+  font-weight: 600;
+  box-shadow: 0 4px 14px #10b98122;
+}
+.apply:hover { background: linear-gradient(180deg, #24ab72, #199063); }
+
+.delete { border-radius: var(--radius-sm); }
+
+/* ---------- Mode bar ---------- */
+#mode-bar { padding: 8px 10px; gap: 6px; }
+.toolbar-group { background: #ffffff05; border-radius: 10px; }
+.mode-btn {
+  border-radius: 8px;
+  background: #142030;
+  border-color: var(--edge);
+}
+.mode-btn.active {
+  background: linear-gradient(180deg, #1c5f8f, #174a70);
+  border-color: #4aa8ee;
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+#simulation-mode-btn.active {
+  background: linear-gradient(180deg, #8a6416, #6b4d10);
+  border-color: #e0b13f;
+  box-shadow: 0 0 0 3px #fbbf2422;
+}
+#runtime-mode-btn.active {
+  background: linear-gradient(180deg, #1d7a3c, #165f2e);
+  border-color: #3fd071;
+  box-shadow: 0 0 0 3px #34d39922;
+}
+
+/* ---------- Palette ---------- */
+.palette { padding: 8px; gap: 4px; }
+.palette button {
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  color: #c3d1de;
+  border: 1px solid transparent;
+}
+.palette button:hover:not(.disabled) {
+  background: #16283a;
+  border-color: #2a4661;
+  color: #fff;
+}
+
+/* ---------- Inspector ---------- */
+.tabs { padding: 6px; gap: 4px; border-bottom: 1px solid var(--edge-soft); }
+.tabs .tab {
+  border-radius: 8px;
+  border-bottom: 0;
+  padding: 7px 4px;
+  font-weight: 600;
+}
+.tabs .tab:hover { background: #ffffff08; }
+.tabs .tab.active {
+  background: var(--blue-soft);
+  color: #fff;
+  border-bottom: 0;
+  box-shadow: inset 0 0 0 1px #3aa0ff55;
+}
+
+#property-form input,
+#property-form select,
+.node-input, .force-input,
+.modal-field input,
+#mapping-filter, #monitor-filter,
+#plc-connect-form input,
+#plc-connect-form select {
+  background: #0b131b;
+  border: 1px solid #2a3b4b;
+  border-radius: 7px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+#property-form input:focus,
+#property-form select:focus,
+.node-input:focus, .force-input:focus,
+#mapping-filter:focus, #monitor-filter:focus,
+#plc-connect-form input:focus,
+#plc-connect-form select:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+
+.mapping-card, .monitor-card { transition: background .12s ease; }
+.mapping-card:hover { background: #ffffff05; }
+.mapping-card.unmapped-row { background: #3a2f1466; }
+.live-value, .monitor-value, .tag-picker-address, .node-input { font-family: var(--mono); }
+
+/* ---------- Modals ---------- */
+.modal-overlay { backdrop-filter: blur(4px); background: rgba(3, 6, 10, .65); }
+.modal-box {
+  border-radius: 14px;
+  border: 1px solid #2a3d50;
+  box-shadow: 0 24px 70px #000000aa, 0 0 0 1px #ffffff06 inset;
+  animation: modal-in .16s ease-out;
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+.tag-picker-row { transition: background .1s ease; }
+.tag-picker-row:hover { background: #16283a; }
+
+/* ---------- Status ---------- */
+.status-dot.connected { box-shadow: 0 0 0 3px #34d39922, 0 0 10px #34d39988; }
+#runtime-alarm-bar { border-radius: var(--radius-sm); }
+
+/* ---------- Scrollbars ---------- */
+* { scrollbar-width: thin; scrollbar-color: #2b3d50 transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: #2b3d50; border-radius: 9px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: #3b5570; background-clip: padding-box; border: 2px solid transparent; }
+
+/* =====================================================================
+   SIMULATION VIEW
+   ===================================================================== */
+
+#canvas-viewport {
+  border-radius: var(--radius);
+  border: 1px solid var(--edge);
+  background-color: #0c141c;
+  background-image:
+    radial-gradient(circle at 1px 1px, #2c3f52 1.1px, transparent 1.3px),
+    radial-gradient(900px 500px at 50% 0%, #163049aa, transparent 70%);
+  background-size: 25px 25px, 100% 100%;
+  box-shadow: var(--shadow), inset 0 0 80px #00000066;
+}
+#canvas-viewport::after {          /* subtle vignette */
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, #00000055 100%);
+}
+
+.component { filter: drop-shadow(0 6px 8px #00000066); }
+.component.selected {
+  outline: 2px solid var(--blue);
+  outline-offset: 4px;
+  border-radius: 4px;
+  filter: drop-shadow(0 0 10px #3aa0ff88) drop-shadow(0 6px 8px #00000066);
+}
+.tag {
+  background: #0b131bf0;
+  border: 1px solid #35506a;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  box-shadow: 0 4px 12px #00000066;
+}
+
+/* ---------- Conveyor: steel frame, side rails, rubber belt, rollers ---------- */
+.conveyor-ui {
+  background:
+    linear-gradient(180deg, #8fa1b1 0, #5d6e7d 12%, #33414d 50%, #5d6e7d 88%, #8fa1b1 100%);
+  border: 2px solid #1e2a35;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px #ffffff18, inset 0 -6px 10px #00000055;
+}
+.conveyor-ui:before {                       /* belt surface + moving slats */
+  inset: 6px 4px;
+  border-radius: 3px;
+  background:
+    repeating-linear-gradient(90deg, #ffffff30 0 3px, transparent 3px 40px),
+    linear-gradient(180deg, #2b343d, #1a2128 55%, #2b343d);
+  background-position: var(--belt-phase, 0px) 0, 0 0;
+  opacity: 1;
+  box-shadow: inset 0 2px 5px #000000aa;
+}
+.conveyor-ui:after {                        /* end rollers */
+  content: "";
+  position: absolute; inset: 3px 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, #9fb0bf 0, #55646f 100%) left / 8px 100% no-repeat,
+    linear-gradient(270deg, #9fb0bf 0, #55646f 100%) right / 8px 100% no-repeat;
+  border-radius: 6px;
+  opacity: .9;
+}
+.conveyor-ui.running:after { box-shadow: 0 0 0 1px #34d39955; }
+
+/* ---------- Boxes: cardboard with tape + smooth motion ---------- */
+.box-ui {
+  z-index: 2;
+  background:
+    linear-gradient(90deg, transparent calc(50% - 2px), #e8c98f88 calc(50% - 2px), #e8c98f88 calc(50% + 2px), transparent calc(50% + 2px)),
+    linear-gradient(135deg, #d9a56b, #a2683a);
+  border: 1px solid #5f3d20;
+  border-radius: 3px;
+  box-shadow: 0 3px 6px #000000aa, inset 0 1px 0 #ffffff40, inset 0 -2px 0 #00000030;
+  transition: left 90ms linear;
+}
+
+/* ---------- Cylinder: brushed metal body, chrome rod ---------- */
+.body-ui {
+  background: linear-gradient(180deg, #c6d3de, #7c8fa0 45%, #4c5c6b);
+  border: 2px solid #22303c;
+  border-radius: 5px;
+  box-shadow: inset 0 1px 0 #ffffff66;
+}
+.rod-ui {
+  background: linear-gradient(180deg, #ffffff, #cfdbe4 40%, #8798a7);
+  border: 1px solid #5a6b79;
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 1px 3px #00000066;
+  transition: width 60ms linear;
+}
+
+/* ---------- Sensor: glowing LED + detection halo ---------- */
+.sensor-body {
+  background: linear-gradient(145deg, #4a545e, #1b2026);
+  border: 2px solid #0e1216;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 #ffffff25;
+}
+.sensor-lens {
+  background: radial-gradient(circle at 35% 30%, #5b6d7e, #0e1216 70%);
+  border: 1px solid #8a9aa8;
+}
+.sensor-led { transition: background .1s ease, box-shadow .1s ease; }
+.sensor-ui.detected .sensor-led {
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade80, 0 0 18px #4ade80aa;
+}
+.sensor-ui.detected .sensor-body { box-shadow: 0 0 0 2px #4ade8055, 0 0 18px #4ade8044; }
+
+/* ---------- Tower light: lens gloss + real glow ---------- */
+.tower-ui {
+  background: linear-gradient(90deg, #2a2d33, #4a4e57 50%, #2a2d33);
+  border: 1px solid #0e0f12;
+}
+.tower-lamp {
+  position: relative;
+  border: 1px solid #0b0c0e;
+  transition: box-shadow .15s ease, filter .15s ease;
+  filter: brightness(.55) saturate(.8);
+}
+.tower-lamp::after {
+  content: "";
+  position: absolute; left: 14%; top: 10%; width: 72%; height: 35%;
+  border-radius: 40%;
+  background: linear-gradient(180deg, #ffffff66, transparent);
+}
+.tower-lamp.lit {
+  filter: none;
+  box-shadow: inset 0 0 8px #ffffff88, 0 0 10px var(--lamp-color), 0 0 26px var(--lamp-color);
+}
+
+/* ---------- Toggle & push buttons ---------- */
+.toggle-track { transition: background .15s ease, box-shadow .15s ease; }
+.toggle-knob  { transition: left .15s ease, transform .15s ease; box-shadow: 0 2px 4px #00000088; }
+.toggle-ui.on .toggle-track { box-shadow: 0 0 12px #34d39966; }
+.pushbutton-face, .epb-face { transition: transform .06s ease, filter .1s ease, box-shadow .1s ease; }
+.pushbutton-ui.pressed .pushbutton-face,
+.epb-ui.pressed .epb-face { filter: brightness(1.25); }
+
+/* ---------- Motor: running glow ---------- */
+.motor-ui.running { filter: drop-shadow(0 0 10px #34d39955); }
+
+/* ---------- Respect reduced-motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

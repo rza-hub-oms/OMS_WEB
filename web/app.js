@@ -1,6 +1,14 @@
 // web/app.js — UI composition and interaction layer
 import { send, setMessageHandler } from "./modules/socket.js";
 import { renderConveyor } from "./modules/conveyor-renderer.js";
+import { renderCylinder } from "./modules/cylinder-renderer.js";
+import { renderMotor } from "./modules/motor-renderer.js";
+import { renderSensor } from "./modules/sensor-renderer.js";
+import { renderPushButton } from "./modules/push-button-renderer.js";
+import { renderEmergencyPushButton } from "./modules/emergency-push-button-renderer.js";
+import { renderToggleSwitch } from "./modules/toggle-switch-renderer.js";
+import { renderTowerLight } from "./modules/tower-light-renderer.js";
+import { renderLabel } from "./modules/label-renderer.js";
 // Connects to the backend WebSocket, renders each component as a real
 // DOM element positioned from actual Scene state, and supports
 // dragging new components from the dock onto the canvas.
@@ -555,9 +563,9 @@ function renderPropertyPanel() {
     const newName = e.target.value.trim();
     if (!selectedTag || !newName || newName === selectedTag) return;
 
-    sendSetProperty(selectedTag, "name", newName);
     pushHistory();
     markDirty();
+    sendSetProperty(selectedTag, "name", newName);
     selectedTag = newName;
   });
 
@@ -778,15 +786,23 @@ function render(state) {
 
   // Create/update components that exist in the simulation.
   for (const [tagName, obj] of Object.entries(state)) {
-    if (obj.type === "conveyor") renderConveyor(tagName, obj, { getOrCreate, selectComponent, isDesignMode, sendSetPoint, getLatestState: () => latestState });
-    else if (obj.type === "cylinder") renderCylinder(tagName, obj);
-    else if (obj.type === "motor") renderMotor(tagName, obj);
-    else if (obj.type === "sensor") renderSensor(tagName, obj);
-    else if (obj.type === "push_button") renderPushButton(tagName, obj);
-    else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj);
-    else if (obj.type === "toggle_switch") renderToggleSwitch(tagName, obj);
-    else if (obj.type === "tower_light") renderTowerLight(tagName, obj);
-    else if (obj.type === "label") renderLabel(tagName, obj);
+    const deps = {
+      getOrCreate, selectComponent, isDesignMode, sendSetPoint, sendSetProperty,
+      getLatestState: () => latestState,
+      colors: PUSH_BUTTON_COLORS,
+      lampOrder: TOWER_LIGHT_LAMP_ORDER,
+      litColors: TOWER_LIGHT_LIT_COLORS,
+      dimColors: TOWER_LIGHT_DIM_COLORS,
+    };
+    if (obj.type === "conveyor") renderConveyor(tagName, obj, deps);
+    else if (obj.type === "cylinder") renderCylinder(tagName, obj, deps);
+    else if (obj.type === "motor") renderMotor(tagName, obj, deps);
+    else if (obj.type === "sensor") renderSensor(tagName, obj, deps);
+    else if (obj.type === "push_button") renderPushButton(tagName, obj, deps);
+    else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj, deps);
+    else if (obj.type === "toggle_switch") renderToggleSwitch(tagName, obj, deps);
+    else if (obj.type === "tower_light") renderTowerLight(tagName, obj, deps);
+    else if (obj.type === "label") renderLabel(tagName, obj, deps);
   }
 
   renderComponentsList(state);
@@ -1094,362 +1110,6 @@ function getOrCreate(tagName, className, innerBuilder, onClick) {
   }
 
   return el;
-}
-
-function renderCylinder(tagName, cyl) {
-  const el = getOrCreate(
-    tagName,
-    "cylinder-ui",
-    (container) => {
-      const body = document.createElement("div");
-      body.className = "body-ui";
-      container.appendChild(body);
-
-      const rod = document.createElement("div");
-      rod.className = "rod-ui";
-      container.appendChild(rod);
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-    },
-    () => {
-      selectComponent(tagName);
-      if (isDesignMode()) return;
-      sendSetPoint(tagName, "extend", latestState[tagName]?.extended ? 0 : 1);
-    }
-  );
-
-  const bodyWidth = cyl.width * 0.62;
-
-  // Container spans the full item footprint (body + rod travel) so
-  // rotation pivots around the whole item's center, matching the
-  // original CylinderItem's setTransformOriginPoint(rect.center()).
-  el.style.left = `${cyl.x}px`;
-  el.style.top = `${cyl.y}px`;
-  el.style.width = `${cyl.width}px`;
-  el.style.height = `${cyl.height}px`;
-  el.style.transform = `rotate(${cyl.rotation || 0}deg)`;
-  el.style.zIndex = cyl.layer || 0;
-
-  el.querySelector(".body-ui").style.width = `${bodyWidth}px`;
-
-  const rodMaxLen = cyl.width - bodyWidth;
-  const rodLen = rodMaxLen * cyl.progress;
-
-  const rod = el.querySelector(".rod-ui");
-  rod.style.left = `${bodyWidth}px`;
-  rod.style.width = `${rodLen}px`;
-
-  el.querySelector(".tag").textContent =
-    `${tagName}  progress=${cyl.progress.toFixed(2)}`;
-}
-
-function renderMotor(tagName, c) {
-  const el = getOrCreate(
-    tagName,
-    "motor-ui",
-    (container) => {
-      container.innerHTML = `
-        <div class="motor-terminal"></div>
-        <div class="motor-body">
-          <div class="motor-ribs"></div>
-          <div class="motor-status"></div>
-        </div>
-        <div class="motor-shield"></div>
-        <div class="motor-fan">
-          <div class="motor-fan-label">FWD</div>
-          <div class="motor-direction"></div>
-        </div>
-        <div class="motor-shaft"></div>
-        <div class="motor-coupling"></div>
-        <div class="motor-foot motor-foot-left"></div>
-        <div class="motor-foot motor-foot-right"></div>
-        <div class="tag"></div>
-      `;
-
-      selectComponent(tagName);
-    },
-    () => {
-      selectComponent(tagName);
-      if (isDesignMode()) return;
-      sendSetPoint(
-        tagName,
-        "running",
-        latestState[tagName]?.running ? 0 : 1
-      );
-    }
-  );
-
-  el.style.left = `${c.x}px`;
-  el.style.top = `${c.y}px`;
-  el.style.width = `${c.width}px`;
-  el.style.height = `${c.height}px`;
-  el.style.transform = `rotate(${c.rotation || 0}deg)`;
-  el.style.zIndex = c.layer || 0;
-
-  el.classList.toggle("running", !!c.running);
-  el.classList.toggle("reverse", !c.direction_forward);
-  // Belt direction is rendered from the backend simulation phase.
-  // There is deliberately no independent CSS animation: boxes, belt
-  // markings, and direction therefore share one source of truth.
-  el.style.setProperty("--belt-phase", `${-(c.belt_phase || 0)}px`);
-
-  const fanLabel = el.querySelector(".motor-fan-label");
-  fanLabel.textContent = c.direction_forward ? "FWD" : "REV";
-
-  const direction = el.querySelector(".motor-direction");
-
-  if (c.running) {
-    direction.style.transform =
-      `rotate(${c.rotation_phase || 0}deg)`;
-  } else {
-    direction.style.transform = "rotate(0deg)";
-  }
-
-  el.querySelector(".tag").textContent = tagName;
-}
-
-function renderSensor(tagName, s) {
-  const el = getOrCreate(
-    tagName,
-    "sensor-ui",
-    (container) => {
-      container.innerHTML = `
-        <div class="sensor-body">
-          <div class="sensor-lens"></div>
-          <div class="sensor-led"></div>
-        </div>
-        <div class="tag"></div>
-      `;
-
-      selectComponent(tagName);
-    },
-    () => {
-      selectComponent(tagName);
-    }
-  );
-
-  el.style.left = `${s.x}px`;
-  el.style.top = `${s.y}px`;
-  el.style.width = `${s.width}px`;
-  el.style.height = `${s.height}px`;
-  el.style.zIndex = s.layer || 0;
-
-  el.classList.toggle("detected", !!s.detected);
-
-  el.querySelector(".tag").textContent =
-    `${tagName}  detected=${s.detected}`;
-}
-
-// A momentary control: pressed must follow the mouse being held down,
-// not a click-to-toggle like conveyor/cylinder/motor above. So it's
-// sent via "set_property" (-> Scene.apply_property -> set_pressed()),
-// not "set_point" (-> apply_command, restricted to PLC-writable
-// points) -- a real pushbutton's state is operator input, never
-// written by the PLC. pointer capture (from enableComponentDragging)
-// means pointerup still fires on this element even if the mouse is
-// released after moving off it.
-function renderPushButton(tagName, b) {
-  const el = getOrCreate(
-    tagName,
-    "pushbutton-ui",
-    (container) => {
-      const face = document.createElement("div");
-      face.className = "pushbutton-face";
-      container.appendChild(face);
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-
-      const release = () => {
-        if (latestState[tagName]?.pressed) sendSetProperty(tagName, "pressed", 0);
-      };
-
-      container.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0) return;
-        sendSetProperty(tagName, "pressed", 1);
-      });
-      container.addEventListener("pointerup", release);
-      container.addEventListener("pointerleave", release);
-      container.addEventListener("pointercancel", release);
-    },
-    () => {
-      selectComponent(tagName);
-    }
-  );
-
-  el.style.left = `${b.x}px`;
-  el.style.top = `${b.y}px`;
-  el.style.width = `${b.width}px`;
-  el.style.height = `${b.height}px`;
-  el.style.zIndex = b.layer || 0;
-  el.style.setProperty("--btn-color", PUSH_BUTTON_COLORS[b.color] || PUSH_BUTTON_COLORS.Red);
-
-  el.classList.toggle("pressed", !!b.pressed);
-
-  el.querySelector(".tag").textContent = `${tagName}  pressed=${b.pressed}`;
-}
-
-// Latching, unlike push_button above: one click presses it (and latches
-// the freeze -- see Scene.is_emergency_stopped()), the next click
-// releases it. Ported from EmergencyPushButtonItem.mousePressEvent,
-// whose mouseReleaseEvent is commented out there too.
-function renderEmergencyPushButton(tagName, b) {
-  const el = getOrCreate(
-    tagName,
-    "epb-ui",
-    (container) => {
-      const face = document.createElement("div");
-      face.className = "epb-face";
-      container.appendChild(face);
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-
-      container.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0) return;
-        const isPressed = !!latestState[tagName]?.pressed;
-        sendSetProperty(tagName, "pressed", isPressed ? 0 : 1);
-      });
-    },
-    () => {
-      selectComponent(tagName);
-    }
-  );
-
-  el.style.left = `${b.x}px`;
-  el.style.top = `${b.y}px`;
-  el.style.width = `${b.width}px`;
-  el.style.height = `${b.height}px`;
-  el.style.zIndex = b.layer || 0;
-
-  el.classList.toggle("pressed", !!b.pressed);
-
-  el.querySelector(".tag").textContent = `${tagName}  pressed=${b.pressed}`;
-}
-
-// Click (press+release without a drag) flips the state -- getOrCreate's
-// own "click" listener already ignores clicks that followed a drag
-// (el.dataset.justDragged), so ToggleSwitchItem's move-vs-click check
-// doesn't need to be reimplemented here.
-function renderToggleSwitch(tagName, t) {
-  const el = getOrCreate(
-    tagName,
-    "toggle-ui",
-    (container) => {
-      const track = document.createElement("div");
-      track.className = "toggle-track";
-      const knob = document.createElement("div");
-      knob.className = "toggle-knob";
-      track.appendChild(knob);
-      container.appendChild(track);
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-    },
-    () => {
-      const isOn = !!latestState[tagName]?.on;
-      sendSetProperty(tagName, "on", isOn ? 0 : 1);
-      selectComponent(tagName);
-    }
-  );
-
-  el.style.left = `${t.x}px`;
-  el.style.top = `${t.y}px`;
-  el.style.width = `${t.width}px`;
-  el.style.height = `${t.height}px`;
-  el.style.zIndex = t.layer || 0;
-
-  el.classList.toggle("on", !!t.on);
-
-  el.querySelector(".tag").textContent = `${tagName}  on=${t.on}`;
-}
-
-// Each lamp is independently clickable -- unlike push_button/
-// emergency_push_button/toggle_switch, red/blue/green/yellow are
-// PLC-writable points (setters exist), so clicks go through
-// sendSetPoint (-> apply_command), same as conveyor/cylinder, not
-// sendSetProperty.
-function renderTowerLight(tagName, tl) {
-  const el = getOrCreate(
-    tagName,
-    "tower-ui",
-    (container) => {
-      for (const color of TOWER_LIGHT_LAMP_ORDER) {
-        const lamp = document.createElement("div");
-        lamp.className = "tower-lamp";
-        lamp.dataset.color = color;
-        container.appendChild(lamp);
-      }
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-    },
-    () => {
-      selectComponent(tagName);
-    }
-  );
-
-  el.style.left = `${tl.x}px`;
-  el.style.top = `${tl.y}px`;
-  el.style.width = `${tl.width}px`;
-  el.style.height = `${tl.height}px`;
-  el.style.zIndex = tl.layer || 0;
-
-  for (const color of TOWER_LIGHT_LAMP_ORDER) {
-    const lamp = el.querySelector(`.tower-lamp[data-color="${color}"]`);
-    const lit = !!tl[color];
-    lamp.classList.toggle("lit", lit);
-    lamp.style.setProperty(
-      "--lamp-color",
-      lit ? TOWER_LIGHT_LIT_COLORS[color] : TOWER_LIGHT_DIM_COLORS[color]
-    );
-  }
-
-  el.querySelector(".tag").textContent =
-    `${tagName}  ${TOWER_LIGHT_LAMP_ORDER.map((c) => `${c}=${tl[c]}`).join(" ")}`;
-}
-
-// Visual-only annotation -- no PLC points, no click-to-toggle behavior.
-// Text/font/color are all driven by the Properties panel.
-function renderLabel(tagName, l) {
-  const el = getOrCreate(
-    tagName,
-    "label-ui",
-    (container) => {
-      const text = document.createElement("div");
-      text.className = "label-text";
-      container.appendChild(text);
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      container.appendChild(tag);
-    },
-    () => {
-      selectComponent(tagName);
-    }
-  );
-
-  el.style.left = `${l.x}px`;
-  el.style.top = `${l.y}px`;
-  el.style.width = `${l.width}px`;
-  el.style.height = `${l.height}px`;
-  el.style.zIndex = l.layer || 0;
-  el.style.background = l.background_color;
-
-  const textEl = el.querySelector(".label-text");
-  textEl.textContent = l.text;
-  textEl.style.fontFamily = l.font_family;
-  textEl.style.fontSize = `${l.font_size}px`;
-  textEl.style.fontWeight = l.bold ? "bold" : "normal";
-  textEl.style.fontStyle = l.italic ? "italic" : "normal";
-
-  el.querySelector(".tag").textContent = tagName;
 }
 
 // ---------- Dock: drag components onto the canvas ----------

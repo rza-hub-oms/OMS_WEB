@@ -123,6 +123,35 @@ class Scene:
     def get(self, tag_name: str):
         return self.objects.get(tag_name)
 
+    def rename_component(self, tag_name: str, new_name: str) -> bool:
+        """Rename a component while keeping all scene references consistent.
+
+        Component tags are used as dictionary keys, PLC mapping identifiers,
+        sensor watch targets, and cylinder relation targets.  A rename must
+        update all of those references atomically so a saved project cannot
+        contain dangling links after an otherwise valid UI rename.
+        """
+        obj = self.objects.get(tag_name)
+        new_name = str(new_name).strip()
+        if obj is None or not new_name or new_name == tag_name or new_name in self.objects:
+            return False
+
+        del self.objects[tag_name]
+        obj.tag_name = new_name
+        self.objects[new_name] = obj
+
+        for mapping in self.plc_mapping:
+            if mapping.get("object_tag") == tag_name:
+                mapping["object_tag"] = new_name
+
+        for other in self.objects.values():
+            if isinstance(other, SensorBehavior) and other.watch_tag == tag_name:
+                other.watch_tag = new_name
+            elif isinstance(other, CylinderBehavior) and other.target_tag == tag_name:
+                other.target_tag = new_name
+
+        return True
+
     def create_component(self, component_type: str, x: float, y: float):
         """Create a new component instance of the given type at (x, y),
         with an auto-generated unique tag name (e.g. "Conveyor_2"),
@@ -420,21 +449,7 @@ class Scene:
             return False
 
         if prop_name == "name":
-            new_name = str(value).strip()
-            if not new_name or new_name == obj.tag_name or new_name in self.objects:
-                return False
-
-            old_name = obj.tag_name
-
-            del self.objects[old_name]
-            obj.tag_name = new_name
-            self.objects[new_name] = obj
-
-            for mapping in self.plc_mapping:
-                if mapping.get("object_tag") == old_name:
-                    mapping["object_tag"] = new_name
-
-            return True
+            return self.rename_component(tag_name, value)
 
         setter = getattr(obj, f"set_{prop_name}", None)
         if setter is None:
