@@ -46,3 +46,31 @@
 - Added Sequence editor and live sequence status panel.
 - Added `.oms` v3 → v4 migration and sequence persistence.
 - Runtime remains PLC-controlled and does not execute simulation sequences.
+
+
+## v6 — Central Tag / Variable System
+- Added a central tag registry shared by simulation, PLC mapping and future Runtime features.
+- Component I/O points are exposed as stable tags (`Object.IOPoint`).
+- Added persistent internal OMS tags with datatype, description and writable state.
+- Added Tags inspector panel.
+- Added tag read/write API and project persistence.
+
+## v7.1 - Visual Tag Logic Editor
+
+- Replaced the prompt-based internal-tag `fx` editor with a visual condition builder.
+- Select source tags from a dropdown instead of typing `tag("...")` manually.
+- Select comparison operators appropriate to the tag datatype.
+- Enter boolean, numeric, or text comparison values using normal form controls.
+- Add multiple conditions joined by AND/OR.
+- Live preview shows the generated OMS expression.
+- Advanced mode remains available for complex expressions.
+- Existing simple expressions are loaded back into the visual builder.
+
+## v8 - Internal tag connections and PLC mapping search
+- Internal tags can connect to component I/O signals.
+- Connected internal tags inherit the component signal datatype, direction, live value and writability.
+- Internal tags now appear in PLC Mapping and can be mapped directly to PLC addresses.
+- PLC synchronization resolves `tag_name` mappings through the central tag registry.
+- Mapping Search opens the existing parsed S7/OPC UA address picker for every tag.
+- PLC mapping validation and force support include central tags.
+- Bound internal-tag connections persist in `.oms` projects.

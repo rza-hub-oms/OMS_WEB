@@ -126,6 +126,7 @@
         <button type="button" class="tab" data-tab="logic">Logic</button>
         <button type="button" class="tab" data-tab="sequences">Sequences</button>
         <button type="button" class="tab" data-tab="monitor">PLC Monitor</button>
+        <button type="button" class="tab" data-tab="tags">Tags</button>
         <button type="button" class="tab" data-tab="components">Components</button>
       </div>
 
@@ -204,6 +205,13 @@
           </div>
           <div id="monitor-tbody" class="monitor-card-list"></div>
         </div>
+      </div>
+      <div id="tags-tab" class="tab-panel" data-panel="tags">
+        <div class="mapping-actions">
+          <button id="tag-add-btn" title="Add internal tag">＋</button>
+        </div>
+        <p class="hint">Central OMS tag system. Component I/O tags are generated automatically; internal tags can be used by alarms, trends and future Runtime functions.</p>
+        <div id="tag-list" class="mapping-card-list"></div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
           <ul id="components-list"></ul>
@@ -290,6 +298,61 @@
     </div>
   </div>
 
+  <div id="tag-expression-modal" class="modal-overlay hidden">
+    <div class="modal-box tag-expression-modal-box">
+      <div class="modal-header">
+        <div>
+          <span id="tag-expression-title">Tag Logic</span>
+          <small id="tag-expression-subtitle" class="modal-subtitle"></small>
+        </div>
+        <button type="button" class="modal-close" id="tag-expression-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tag-logic-help">
+          <b>Build the condition visually.</b>
+          Select a tag, choose a comparison, enter the value, then add another condition if needed.
+          OMS creates the expression for you.
+        </div>
+        <div id="tag-expression-rows" class="tag-expression-rows"></div>
+        <div class="tag-expression-toolbar">
+          <button type="button" id="tag-expression-add">＋ Add condition</button>
+          <button type="button" id="tag-expression-clear">Clear</button>
+          <label class="tag-expression-mode"><input type="checkbox" id="tag-expression-advanced-toggle"> Advanced</label>
+        </div>
+        <div id="tag-expression-advanced-wrap" class="hidden">
+          <label class="modal-field">Expression
+            <textarea id="tag-expression-advanced" rows="4" spellcheck="false" placeholder='tag("Sensor_1.detected") AND tag("Conveyor_1.running")'></textarea>
+          </label>
+          <p class="hint">Advanced syntax is optional. The visual builder is recommended for normal machine logic.</p>
+        </div>
+        <div class="tag-expression-preview">
+          <div class="tag-expression-preview-label">Resulting expression</div>
+          <code id="tag-expression-preview">—</code>
+        </div>
+        <p id="tag-expression-error" class="plc-error"></p>
+        <div class="modal-actions">
+          <button type="button" id="tag-expression-cancel">Cancel</button>
+          <button type="button" id="tag-expression-save" class="apply">Apply Logic</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tag-component-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span id="tag-component-title">Connect Internal Tag</span>
+        <button type="button" class="modal-close" id="tag-component-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Select the component signal that this internal tag should represent. The tag will then follow that signal and appear automatically in PLC Mapping.</p>
+        <input id="tag-component-filter" type="text" placeholder="Search component or I/O point...">
+        <div id="tag-component-list" class="tag-picker-list"></div>
+        <p id="tag-component-empty" class="hint hidden"></p>
+      </div>
+    </div>
+  </div>
+
   <div id="tag-picker-modal" class="modal-overlay hidden">
     <div class="modal-box">
       <div class="modal-header">
@@ -305,6 +368,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=11"></script>
+  <script type="module" src="app.js?v=13"></script>
 </body>
 </html>

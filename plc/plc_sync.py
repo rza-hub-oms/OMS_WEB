@@ -597,10 +597,10 @@ class PlcSyncBase:
         for entry, oms_type, mapping_error in resolved:
             node_id = entry["plc_node"]
 
-            point_key = (entry["item"].tag_name, entry.get("io_point"))
+            point_key = (entry.get("tag_name"), entry.get("io_point"))
             
             if mapping_error is not None:
-                object_tag = getattr(entry["item"], "tag_name", "Unknown object")
+                object_tag = entry.get("tag_name", "Unknown tag")
                 io_point = entry.get("io_point", "Unknown point")
 
                 already_reported = point_key in self._reported_mapping_errors
@@ -680,42 +680,51 @@ class PlcSyncBase:
                 self._last_written.update(writes_to_queue)
 
     def _resolve_mapped_points(self):
-        """Matches scene.plc_mapping entries (object_tag, io_point,
-        plc_node) back to live scene objects and their getter/setter
-        pair. Deliberately independent of api/mapping.py (this module
-        has no web-framework dependency either), even though the logic
-        mirrors MappingPanel._scan_scene() in the original desktop
-        app."""
-        by_tag = {}
-        for obj in self.scene.objects.values():
-            tag = getattr(obj, "tag_name", None)
-            if tag is not None and hasattr(obj, "get_io_signals"):
-                by_tag[tag] = obj
+        """Resolve both legacy component mappings and central OMS tag mappings.
 
+        New mappings may use ``tag_name``.  That lets internal tags participate
+        in PLC communication without duplicating the component I/O contract.
+        Legacy {object_tag, io_point, plc_node} mappings remain supported.
+        """
+        by_tag = {getattr(obj, "tag_name", None): obj for obj in self.scene.objects.values()}
         resolved = []
         for entry in self.scene.plc_mapping:
-            item = by_tag.get(entry.get("object_tag"))
-            if item is None:
-                continue
-
-            signals = {signal.name: signal for signal in item.get_io_signals()}
-            signal = signals.get(entry.get("io_point"))
-            if signal is None:
-                continue
-
-            getter, setter = signal.getter, signal.setter
             node_id = entry.get("plc_node")
             if not node_id:
                 continue
 
+            tag_name = entry.get("tag_name")
+            if tag_name:
+                tag = self.scene.tags.get(tag_name)
+                if tag is None:
+                    continue
+                getter = lambda name=tag_name: self.scene.tags.read(name)
+                setter = (lambda value, name=tag_name: self.scene.tags.write(name, value)) if tag.writable else None
+                resolved.append({
+                    "item": by_tag.get(tag.object_tag),
+                    "tag_name": tag_name,
+                    "getter": getter,
+                    "setter": setter,
+                    "plc_node": node_id,
+                    "io_point": entry.get("point") or tag.io_point or "value",
+                })
+                continue
+
+            item = by_tag.get(entry.get("object_tag"))
+            if item is None:
+                continue
+            signals = {signal.name: signal for signal in item.get_io_signals()}
+            signal = signals.get(entry.get("io_point"))
+            if signal is None:
+                continue
             resolved.append({
                 "item": item,
-                "getter": getter,
-                "setter": setter,
+                "tag_name": item.tag_name,
+                "getter": signal.getter,
+                "setter": signal.setter,
                 "plc_node": node_id,
                 "io_point": entry.get("io_point"),
             })
-
         return resolved
 
 # =============================================================================

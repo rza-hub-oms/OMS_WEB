@@ -312,7 +312,7 @@ class SequenceEngineTests(unittest.TestCase):
         scene, button, motor = self._scene()
         scene.sequences = [{"id": "seq1", "steps": [{"name": "A", "actions": []}]}]
         data = scene_to_project_dict(scene)
-        self.assertEqual(data["version"], 5)
+        self.assertEqual(data["version"], PROJECT_VERSION)
         loaded = Scene(); load_project_dict(loaded, data)
         self.assertEqual(loaded.sequences, scene.sequences)
 
@@ -326,3 +326,125 @@ class SequenceEngineTests(unittest.TestCase):
         button.set_pressed(True)
         scene.tick(0.05, simulate=True, logic_enabled=True)
         self.assertTrue(motor.running)
+
+
+class TagRegistryTests(unittest.TestCase):
+    def test_component_tags_are_centralized(self):
+        scene = Scene()
+        scene.create_component("conveyor", 0, 0)
+        tags = {row["name"]: row for row in scene.tag_catalog()}
+        self.assertIn("Conveyor_1.running", tags)
+        self.assertIn("Conveyor_1.speed", tags)
+        self.assertEqual(tags["Conveyor_1.running"]["object_tag"], "Conveyor_1")
+
+    def test_internal_tag_round_trip(self):
+        scene = Scene()
+        scene.add_tag("ProductionCount", "int", 12, "Good parts", True)
+        self.assertEqual(scene.tags.read("ProductionCount"), 12)
+        data = scene_to_project_dict(scene)
+        loaded = Scene()
+        load_project_dict(loaded, data)
+        self.assertEqual(loaded.tags.read("ProductionCount"), 12)
+        self.assertEqual(loaded.tags.get("ProductionCount").description, "Good parts")
+
+    def test_component_tag_writes_through_registry(self):
+        scene = Scene()
+        motor = scene.create_component("motor", 0, 0)
+        self.assertTrue(scene.set_tag("Motor_1.running", True))
+        self.assertTrue(motor.running)
+
+class TagExpressionTests(unittest.TestCase):
+    def test_internal_tag_expression_reads_component_tag(self):
+        scene = Scene()
+        sensor = SensorBehavior("Sensor_1")
+        scene.add(sensor)
+        scene.add_tag("LineReady", "bool", False)
+        scene.set_tag_expression("LineReady", 'tag("Sensor_1.detected")')
+        sensor.set_detected(True)
+        scene.tags.evaluate_expressions()
+        self.assertTrue(scene.tags.read("LineReady"))
+
+    def test_internal_tag_expression_supports_boolean_and_comparison(self):
+        scene = Scene()
+        sensor = SensorBehavior("Sensor_1")
+        motor = MotorBehavior("Motor_1")
+        scene.add(sensor); scene.add(motor)
+        scene.add_tag("HighSpeedReady", "bool", False)
+        scene.set_tag_expression(
+            "HighSpeedReady",
+            'tag("Sensor_1.detected") and tag("Motor_1.speed") > 80',
+        )
+        sensor.set_detected(True)
+        motor.set_speed(90)
+        scene.tags.evaluate_expressions()
+        self.assertTrue(scene.tags.read("HighSpeedReady"))
+
+    def test_expression_error_is_reported_without_python_execution(self):
+        scene = Scene()
+        scene.add_tag("Safe", "bool", False)
+        scene.set_tag_expression("Safe", '__import__("os").system("echo bad")')
+        scene.tags.evaluate_expressions()
+        tag = scene.tags.get("Safe")
+        self.assertTrue(tag.expression_error)
+        self.assertFalse(tag.value)
+
+    def test_expression_survives_project_round_trip(self):
+        scene = Scene()
+        scene.add_tag("LineReady", "bool", False)
+        scene.set_tag_expression("LineReady", 'tag("Sensor_1.detected")')
+        data = scene_to_project_dict(scene)
+        loaded = Scene()
+        load_project_dict(loaded, data)
+        self.assertEqual(loaded.tags.get("LineReady").expression, 'tag("Sensor_1.detected")')
+        self.assertEqual(data["version"], PROJECT_VERSION)
+
+
+
+def test_internal_tag_can_bind_to_component_signal_and_read_write():
+    from core.scene import Scene
+
+    scene = Scene()
+    motor = scene.create_component("motor", 0, 0)
+    tag = scene.add_tag("MotorStart", "bool", False)
+    assert scene.bind_tag("MotorStart", motor.tag_name, "running")
+    bound = scene.tags.get("MotorStart")
+    assert bound.object_tag == motor.tag_name
+    assert bound.io_point == "running"
+    assert bound.direction == "PLC -> OMS"
+    assert scene.tags.read("MotorStart") is False
+    assert scene.tags.write("MotorStart", True)
+    assert motor.running is True
+
+
+def test_internal_tag_mapping_resolves_through_tag_registry():
+    from core.scene import Scene
+
+    scene = Scene()
+    scene.add_tag("LineReady", "bool", False)
+    scene.plc_mapping = [{"tag_name": "LineReady", "point": "Internal", "plc_node": "DB1.DBX0.0"}]
+    from plc.plc_sync import S7PlcSync
+    sync = S7PlcSync(scene, "127.0.0.1", 0, 1)
+    resolved = sync._resolve_mapped_points()
+    assert len(resolved) == 1
+    assert resolved[0]["tag_name"] == "LineReady"
+    assert resolved[0]["getter"]() is False
+
+
+def test_bound_internal_tag_persists_in_project():
+    from core.scene import Scene
+    from project.serialization import scene_to_project_dict, load_project_dict
+
+    scene = Scene()
+    motor = scene.create_component("motor", 0, 0)
+    scene.add_tag("MotorStart", "bool", False)
+    assert scene.bind_tag("MotorStart", motor.tag_name, "running")
+    data = scene_to_project_dict(scene)
+
+    restored = Scene()
+    load_project_dict(restored, data)
+    tag = restored.tags.get("MotorStart")
+    assert tag is not None
+    assert tag.object_tag == motor.tag_name
+    assert tag.io_point == "running"
+    assert restored.tags.write("MotorStart", True)
+    assert restored.objects[motor.tag_name].running is True

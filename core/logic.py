@@ -31,6 +31,18 @@ class LogicEngine:
             return None, False
         return getter(), True
 
+    def _read_tag(self, tag_name):
+        """Resolve a rule source that points at a central OMS tag (an
+        internal/derived tag with an expression, or any other tag) by
+        name instead of a raw component.io_point pair."""
+        tag = self.scene.tags.get(tag_name)
+        if tag is None:
+            return None, False
+        try:
+            return self.scene.tags.read(tag_name), True
+        except KeyError:
+            return None, False
+
     @staticmethod
     def _coerce(value, actual):
         if isinstance(actual, bool):
@@ -80,8 +92,13 @@ class LogicEngine:
 
             source = rule.get("source") or {}
             destination = rule.get("destination") or {}
-            key = (index, source.get("object_tag"), source.get("io_point"))
-            actual, ok = self._read(source.get("object_tag"), source.get("io_point"))
+            tag_name = source.get("tag_name")
+            if tag_name:
+                key = (index, "tag", tag_name)
+                actual, ok = self._read_tag(tag_name)
+            else:
+                key = (index, source.get("object_tag"), source.get("io_point"))
+                actual, ok = self._read(source.get("object_tag"), source.get("io_point"))
             if not ok:
                 self._previous_values.pop(key, None)
                 self._timers_ms.pop(key, None)
@@ -132,10 +149,13 @@ class LogicEngine:
             seen.add(key)
 
         # Drop stale runtime state after rules are deleted/reordered.
-        valid_keys = {
-            (i, (r.get("source") or {}).get("object_tag"), (r.get("source") or {}).get("io_point"))
-            for i, r in enumerate(rules or [])
-        }
+        valid_keys = set()
+        for i, r in enumerate(rules or []):
+            s = r.get("source") or {}
+            if s.get("tag_name"):
+                valid_keys.add((i, "tag", s.get("tag_name")))
+            else:
+                valid_keys.add((i, s.get("object_tag"), s.get("io_point")))
         for key in list(self._previous_values):
             if key not in valid_keys:
                 self._previous_values.pop(key, None)

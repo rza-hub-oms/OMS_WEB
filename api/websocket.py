@@ -132,6 +132,7 @@ def _plc_status(session: ProjectSession) -> dict:
         "event_log": list(sync.event_log) if sync else [],
         "mapping": mapping,
         "signals": session.scene.signal_catalog(),
+        "tags": session.scene.tag_catalog(),
         # Keep the raw cache available for diagnostics and future monitor
         # features as well.
         "values": raw_values,
@@ -196,6 +197,49 @@ async def websocket_endpoint(ws: WebSocket):
                         command["point"],
                         command["value"],
                     )
+                elif action == "set_tag":
+                    # Central tags are the common data contract. Runtime/PLC
+                    # writes may update writable tags; design-only creation
+                    # and deletion stay in Design mode.
+                    session.scene.set_tag(command["name"], command.get("value"))
+                elif action == "add_tag":
+                    if session.mode != "design":
+                        continue
+                    try:
+                        session.scene.add_tag(
+                            command["name"],
+                            command.get("datatype", "bool"),
+                            command.get("value", False),
+                            command.get("description", ""),
+                            command.get("writable", True),
+                        )
+                    except ValueError as exc:
+                        await ws.send_text(json.dumps({"tag_error": str(exc)}))
+                elif action == "delete_tag":
+                    if session.mode != "design":
+                        continue
+                    session.scene.remove_tag(command["name"])
+                elif action == "set_tag_expression":
+                    if session.mode != "design":
+                        continue
+                    try:
+                        session.scene.set_tag_expression(command["name"], command.get("expression", ""))
+                        session.scene.tags.evaluate_expressions()
+                    except Exception as exc:
+                        await ws.send_text(json.dumps({"tag_error": str(exc)}))
+                elif action == "bind_tag":
+                    if session.mode != "design":
+                        continue
+                    try:
+                        ok = session.scene.bind_tag(command["name"], command["object_tag"], command["io_point"])
+                        if not ok:
+                            await ws.send_text(json.dumps({"tag_error": "The selected component I/O point could not be connected."}))
+                    except Exception as exc:
+                        await ws.send_text(json.dumps({"tag_error": str(exc)}))
+                elif action == "unbind_tag":
+                    if session.mode != "design":
+                        continue
+                    session.scene.unbind_tag(command["name"])
                 elif action == "set_property":
                     tag_name = command["tag_name"]
                     property_name = command["property"]
@@ -262,6 +306,10 @@ async def websocket_endpoint(ws: WebSocket):
                     session.scene.force_value(
                         command["tag_name"], command["io_point"], command["value"],
                     )
+                elif action == "plc_force_tag":
+                    if session.mode == "design":
+                        continue
+                    session.scene.set_tag(command["name"], command.get("value"))
                 elif action == "plc_import_db_tags":
                     from plc.s7_db_import import (
                         parse_db_source, generate_opcua_node_ids, S7ImportError,
@@ -484,26 +532,37 @@ def _validate_mappings(session: ProjectSession) -> list:
 
     problems = []
     for entry in session.scene.plc_mapping:
-        obj = session.scene.objects.get(entry.get("object_tag"))
         expected_type = None
-        if obj is not None:
-            signals = {signal.name: signal for signal in obj.get_io_signals()}
-            signal = signals.get(entry.get("io_point"))
-            if signal is not None:
-                expected_type = signal.datatype
+        if entry.get("tag_name"):
+            tag = session.scene.tags.get(entry.get("tag_name"))
+            if tag is not None:
+                type_map = {"bool": bool, "int": int, "integer": int, "float": float, "real": float}
+                expected_type = type_map.get(str(tag.datatype).lower())
                 if expected_type is None:
                     try:
-                        expected_type = type(signal.read())
+                        expected_type = type(session.scene.tags.read(tag.name))
                     except Exception:
                         expected_type = None
+        else:
+            obj = session.scene.objects.get(entry.get("object_tag"))
+            if obj is not None:
+                signals = {signal.name: signal for signal in obj.get_io_signals()}
+                signal = signals.get(entry.get("io_point"))
+                if signal is not None:
+                    expected_type = signal.datatype
+                    if expected_type is None:
+                        try:
+                            expected_type = type(signal.read())
+                        except Exception:
+                            expected_type = None
 
         error = validate_address_for_backend(
             backend, entry.get("plc_node", ""), expected_type=expected_type,
         )
         if error is not None:
             problems.append({
-                "object_tag": entry.get("object_tag"),
-                "io_point": entry.get("io_point"),
+                "object_tag": entry.get("object_tag") or entry.get("tag_name"),
+                "io_point": entry.get("io_point") or entry.get("point", "value"),
                 "plc_node": entry.get("plc_node"),
                 "error": error,
             })

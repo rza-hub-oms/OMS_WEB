@@ -25,6 +25,7 @@ let simulationPanY = 0;
 
 let omsMode = "design";
 let latestPlc = {};
+let latestTags = [];
 
 let currentProjectFilename = null;
 
@@ -643,6 +644,10 @@ setMessageHandler((event) => {
 
   latestState = msg.objects || {};
   latestPlc = msg.plc || {};
+  if (msg.plc?.tags && JSON.stringify(msg.plc.tags) !== JSON.stringify(latestTags)) {
+    latestTags = msg.plc.tags;
+    renderTags();
+  }
   if (msg.logic_rules && JSON.stringify(msg.logic_rules) !== JSON.stringify(latestLogicRules)) {
     latestLogicRules = msg.logic_rules;
     renderLogicRules();
@@ -662,12 +667,310 @@ setMessageHandler((event) => {
   updateRuntimeAlarmBar();
 });
 
+function renderTags() {
+  const list = document.getElementById("tag-list");
+  if (!list) return;
+  list.innerHTML = latestTags.map(tag => {
+    const value = typeof tag.value === "boolean" ? (tag.value ? "TRUE" : "FALSE") : (tag.value ?? "—");
+    const source = tag.object_tag && tag.io_point ? `${tag.object_tag}.${tag.io_point}` : (tag.system ? "" : "Internal");
+    return `<div class="mapping-card tag-card">
+      <div><b>${tag.name}</b><small>${source}</small></div>
+      <span>${tag.datatype}</span>
+      <span>${tag.direction}</span>
+      <strong>${String(value)}</strong>
+      ${tag.system ? "" : `<button class="tag-connect" type="button" data-tag="${escapeHtml(tag.name)}">${tag.object_tag ? "Connected" : "Connect"}</button><button class="tag-expression" type="button" data-tag="${escapeHtml(tag.name)}">${tag.expression ? "fx ✓" : "fx"}</button><button class="tag-delete" type="button" data-tag="${escapeHtml(tag.name)}">✕</button>`}
+      ${tag.expression ? `<small class="tag-expression-text">= ${tag.expression}${tag.expression_error ? ` · ERROR: ${tag.expression_error}` : ""}</small>` : ""}
+    </div>`;
+  }).join("") || '<p class="empty">No tags.</p>';
+  list.querySelectorAll(".tag-delete").forEach(btn => btn.addEventListener("click", () => {
+    if (!isDesignMode()) return;
+    send({ action: "delete_tag", name: btn.dataset.tag });
+  }));
+  list.querySelectorAll(".tag-connect").forEach(btn => btn.addEventListener("click", () => {
+    if (!isDesignMode()) return;
+    openTagComponentPicker(btn.dataset.tag);
+  }));
+  list.querySelectorAll(".tag-expression").forEach(btn => btn.addEventListener("click", () => {
+    if (!isDesignMode()) return;
+    openTagExpressionEditor(btn.dataset.tag);
+  }));
+}
+
+// ---------- Internal tag -> component connection ----------
+const tagComponentModal = document.getElementById("tag-component-modal");
+const tagComponentList = document.getElementById("tag-component-list");
+const tagComponentFilter = document.getElementById("tag-component-filter");
+const tagComponentEmpty = document.getElementById("tag-component-empty");
+let tagComponentTarget = null;
+
+function openTagComponentPicker(tagName) {
+  tagComponentTarget = tagName;
+  document.getElementById("tag-component-title").textContent = `Connect ${tagName}`;
+  tagComponentFilter.value = "";
+  renderTagComponentPicker("");
+  tagComponentModal.classList.remove("hidden");
+  tagComponentFilter.focus();
+}
+
+function renderTagComponentPicker(filterText) {
+  const needle = String(filterText || "").toLowerCase();
+  const rows = latestTags.filter(t => t.system &&
+    (!needle || `${t.object_tag} ${t.io_point} ${t.name}`.toLowerCase().includes(needle)));
+  tagComponentList.innerHTML = "";
+  tagComponentEmpty.classList.toggle("hidden", rows.length > 0);
+  tagComponentEmpty.textContent = rows.length ? "" : "No component I/O points match that search.";
+
+  const current = latestTags.find(t => t.name === tagComponentTarget);
+  if (current?.object_tag && !needle) {
+    const disconnectRow = document.createElement("div");
+    disconnectRow.className = "tag-picker-row tag-picker-disconnect";
+    disconnectRow.innerHTML = `<span class="tag-picker-name">✕ Disconnect</span>
+      <span class="tag-picker-type">Currently: ${escapeHtml(current.object_tag)}.${escapeHtml(current.io_point)}</span>
+      <span class="tag-picker-address">Use internal value / expression instead</span>`;
+    disconnectRow.addEventListener("click", () => {
+      send({ action: "unbind_tag", name: tagComponentTarget });
+      tagComponentModal.classList.add("hidden");
+    });
+    tagComponentList.appendChild(disconnectRow);
+  }
+
+  for (const tag of rows) {
+    const row = document.createElement("div");
+    row.className = "tag-picker-row";
+    row.innerHTML = `<span class="tag-picker-name">${escapeHtml(tag.object_tag)}</span>
+      <span class="tag-picker-type">${escapeHtml(tag.io_point)} · ${escapeHtml(tag.datatype)}</span>
+      <span class="tag-picker-address">${escapeHtml(tag.direction)}</span>`;
+    row.addEventListener("click", () => {
+      if (!tagComponentTarget) return;
+      send({ action: "bind_tag", name: tagComponentTarget, object_tag: tag.object_tag, io_point: tag.io_point });
+      tagComponentModal.classList.add("hidden");
+    });
+    tagComponentList.appendChild(row);
+  }
+}
+
+tagComponentFilter?.addEventListener("input", e => renderTagComponentPicker(e.target.value));
+document.getElementById("tag-component-close")?.addEventListener("click", () => tagComponentModal.classList.add("hidden"));
+
+document.addEventListener("click", e => {
+  if (e.target === tagComponentModal) tagComponentModal.classList.add("hidden");
+});
+
+// ---------- Visual Tag Logic editor ----------
+// The editor deliberately hides the expression syntax for normal users.
+// It builds the safe tag("...") expression from selectable tags/operators.
+const tagExpressionModal = document.getElementById("tag-expression-modal");
+const tagExpressionRows = document.getElementById("tag-expression-rows");
+const tagExpressionPreview = document.getElementById("tag-expression-preview");
+const tagExpressionError = document.getElementById("tag-expression-error");
+const tagExpressionAdvanced = document.getElementById("tag-expression-advanced");
+let tagExpressionTarget = null;
+let tagExpressionWorking = [];
+
+function expressionTagOptions() {
+  return [...latestTags].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[ch]));
+}
+
+function expressionOperatorOptions(datatype) {
+  if (datatype === "bool") return [["==", "is"], ["!=", "is not"]];
+  if (["int", "float", "number"].includes(datatype)) return [["==", "="], ["!=", "≠"], [">", ">"], [">=", "≥"], ["<", "<"], ["<=", "≤"]];
+  return [["==", "="], ["!=", "≠"]];
+}
+
+function conditionValueControl(row, tag) {
+  const dtype = tag?.datatype || "string";
+  const value = row.value ?? (dtype === "bool" ? "true" : "0");
+  if (dtype === "bool") {
+    return `<select class="tag-cond-value"><option value="true" ${String(value)==="true"?"selected":""}>TRUE</option><option value="false" ${String(value)!== "true"?"selected":""}>FALSE</option></select>`;
+  }
+  const type = ["int","float","number"].includes(dtype) ? "number" : "text";
+  const step = dtype === "float" ? "any" : "1";
+  return `<input class="tag-cond-value" type="${type}" step="${step}" value="${escapeHtml(value)}" placeholder="value">`;
+}
+
+function renderTagExpressionRows() {
+  if (!tagExpressionRows) return;
+  const options = expressionTagOptions();
+  if (!tagExpressionWorking.length) tagExpressionWorking = [{ tag: options[0]?.name || "", op: "==", value: "true", join: "AND" }];
+  tagExpressionRows.innerHTML = tagExpressionWorking.map((row, index) => {
+    const tag = options.find(t => t.name === row.tag) || options[0];
+    const ops = expressionOperatorOptions(tag?.datatype || "string");
+    if (tag && !ops.some(([v]) => v === row.op)) row.op = ops[0][0];
+    const tagOptions = options.map(t => `<option value="${escapeHtml(t.name)}" ${t.name===row.tag?"selected":""}>${escapeHtml(t.name)}</option>`).join("");
+    const opOptions = ops.map(([v,label]) => `<option value="${v}" ${v===row.op?"selected":""}>${label}</option>`).join("");
+    return `<div class="tag-condition-row" data-index="${index}">
+      ${index ? `<select class="tag-cond-join"><option value="AND" ${row.join!=="OR"?"selected":""}>AND</option><option value="OR" ${row.join==="OR"?"selected":""}>OR</option></select>` : `<span class="tag-cond-where">WHEN</span>`}
+      <select class="tag-cond-tag">${tagOptions}</select>
+      <select class="tag-cond-op">${opOptions}</select>
+      ${conditionValueControl(row, tag)}
+      <button type="button" class="tag-cond-remove" title="Remove condition">✕</button>
+    </div>`;
+  }).join("");
+  tagExpressionRows.querySelectorAll(".tag-condition-row").forEach(rowEl => {
+    const i = Number(rowEl.dataset.index);
+    rowEl.querySelector(".tag-cond-tag").addEventListener("change", e => {
+      tagExpressionWorking[i].tag = e.target.value;
+      const t = expressionTagOptions().find(x => x.name === e.target.value);
+      tagExpressionWorking[i].op = expressionOperatorOptions(t?.datatype || "string")[0][0];
+      tagExpressionWorking[i].value = t?.datatype === "bool" ? "true" : "0";
+      renderTagExpressionRows();
+      updateTagExpressionPreview();
+    });
+    rowEl.querySelector(".tag-cond-op").addEventListener("change", e => { tagExpressionWorking[i].op = e.target.value; updateTagExpressionPreview(); });
+    rowEl.querySelector(".tag-cond-value").addEventListener("input", e => { tagExpressionWorking[i].value = e.target.value; updateTagExpressionPreview(); });
+    rowEl.querySelector(".tag-cond-value").addEventListener("change", e => { tagExpressionWorking[i].value = e.target.value; updateTagExpressionPreview(); });
+    rowEl.querySelector(".tag-cond-join")?.addEventListener("change", e => { tagExpressionWorking[i].join = e.target.value; updateTagExpressionPreview(); });
+    rowEl.querySelector(".tag-cond-remove").addEventListener("click", () => {
+      tagExpressionWorking.splice(i, 1);
+      renderTagExpressionRows();
+      updateTagExpressionPreview();
+    });
+  });
+}
+
+function conditionValueExpression(row) {
+  const tag = expressionTagOptions().find(t => t.name === row.tag);
+  const dtype = tag?.datatype || "string";
+  let value = String(row.value ?? "");
+  if (dtype === "bool") value = value === "true" ? "True" : "False";
+  else if (["int","float","number"].includes(dtype)) value = value === "" ? "0" : value;
+  else value = JSON.stringify(value);
+  return `tag(${JSON.stringify(row.tag)}) ${row.op} ${value}`;
+}
+
+function buildVisualTagExpression() {
+  // The backend evaluates this with Python's own ast.parse(), which only
+  // recognizes lowercase `and`/`or` keywords -- not "AND"/"OR". The dropdown
+  // shows uppercase for readability, but the generated expression must use
+  // lowercase or the backend rejects any multi-condition expression as a
+  // syntax error even though every individual condition is valid.
+  return tagExpressionWorking.filter(r => r.tag).map((row, i) => `${i ? ` ${(row.join || "AND").toLowerCase()} ` : ""}${conditionValueExpression(row)}`).join("");
+}
+
+function updateTagExpressionPreview() {
+  const expression = document.getElementById("tag-expression-advanced-toggle")?.checked ? tagExpressionAdvanced.value.trim() : buildVisualTagExpression();
+  tagExpressionPreview.textContent = expression || "—";
+  tagExpressionError.textContent = "";
+  return expression;
+}
+
+const SINGLE_TAG_CONDITION_RE = /^tag\((['"])(.*?)\1\)\s*(==|!=|>=|<=|>|<)\s*(.+)$/;
+
+function parseSingleTagCondition(text, join) {
+  const m = SINGLE_TAG_CONDITION_RE.exec(text.trim());
+  if (!m) return null;
+  let raw = m[4].trim();
+  if (raw === "True" || raw === "False") raw = raw.toLowerCase();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) raw = raw.slice(1, -1);
+  return { tag: m[2], op: m[3], value: raw, join };
+}
+
+function parseExistingExpression(expression) {
+  // Keep existing expressions intact when opening Advanced mode. For the
+  // visual builder, reconstruct its rows only when the expression is
+  // exactly what the builder itself would produce -- one or more
+  // `tag("X") OP value` conditions joined by AND/OR (buildVisualTagExpression()
+  // below). Anything else (hand-written Advanced expressions, functions,
+  // parentheses) returns null so the caller falls back to Advanced mode
+  // instead of silently showing a blank default condition.
+  const text = String(expression || "").trim();
+  if (!text) return null;
+
+  // Split on top-level and/or joins, but only right before another
+  // condition (lookahead for `tag(`) so a join keyword that happens to
+  // appear inside a quoted string value is never mistaken for a separator.
+  // Case-insensitive so expressions saved before the lowercase fix (or
+  // typed by hand in Advanced mode) still reopen correctly.
+  const parts = text.split(/\s+(and|or)\s+(?=tag\()/i);
+  if (parts.length === 1) {
+    const row = parseSingleTagCondition(text, "AND");
+    return row ? [row] : null;
+  }
+
+  const rows = [];
+  let join = "AND";
+  for (const part of parts) {
+    if (/^(and|or)$/i.test(part)) { join = part.toUpperCase(); continue; }
+    const row = parseSingleTagCondition(part, join);
+    if (!row) return null;
+    rows.push(row);
+  }
+  return rows;
+}
+
+function openTagExpressionEditor(tagName) {
+  tagExpressionTarget = tagName;
+  const current = latestTags.find(t => t.name === tagName);
+  document.getElementById("tag-expression-title").textContent = `Logic for ${tagName}`;
+  document.getElementById("tag-expression-subtitle").textContent = current?.datatype ? `Output: ${current.datatype}` : "";
+  tagExpressionError.textContent = "";
+  const existing = current?.expression || "";
+  const parsed = parseExistingExpression(existing);
+  // If there IS a saved expression but the visual builder can't represent
+  // it, open straight into Advanced mode showing the real text -- never
+  // silently fall back to a blank default condition, which made a saved
+  // expression look like it had vanished.
+  const needsAdvanced = !!existing && !parsed;
+  tagExpressionWorking = parsed || [{ tag: expressionTagOptions()[0]?.name || "", op: "==", value: "true", join: "AND" }];
+  tagExpressionAdvanced.value = existing;
+  document.getElementById("tag-expression-advanced-toggle").checked = needsAdvanced;
+  document.getElementById("tag-expression-advanced-wrap").classList.toggle("hidden", !needsAdvanced);
+  renderTagExpressionRows();
+  updateTagExpressionPreview();
+  tagExpressionModal.classList.remove("hidden");
+}
+
+document.getElementById("tag-expression-add")?.addEventListener("click", () => {
+  const options = expressionTagOptions();
+  const tag = options[0];
+  tagExpressionWorking.push({ tag: tag?.name || "", op: tag ? expressionOperatorOptions(tag.datatype)[0][0] : "==", value: tag?.datatype === "bool" ? "true" : "0", join: "AND" });
+  renderTagExpressionRows();
+  updateTagExpressionPreview();
+});
+document.getElementById("tag-expression-clear")?.addEventListener("click", () => {
+  tagExpressionWorking = [];
+  tagExpressionAdvanced.value = "";
+  renderTagExpressionRows();
+  updateTagExpressionPreview();
+});
+document.getElementById("tag-expression-advanced-toggle")?.addEventListener("change", e => {
+  document.getElementById("tag-expression-advanced-wrap").classList.toggle("hidden", !e.target.checked);
+  updateTagExpressionPreview();
+});
+tagExpressionAdvanced?.addEventListener("input", updateTagExpressionPreview);
+document.getElementById("tag-expression-save")?.addEventListener("click", () => {
+  const advanced = document.getElementById("tag-expression-advanced-toggle").checked;
+  const expression = advanced ? tagExpressionAdvanced.value.trim() : buildVisualTagExpression();
+  if (!expression) {
+    send({ action: "set_tag_expression", name: tagExpressionTarget, expression: "" });
+  } else {
+    send({ action: "set_tag_expression", name: tagExpressionTarget, expression });
+  }
+  markDirty();
+  tagExpressionModal.classList.add("hidden");
+});
+["tag-expression-close", "tag-expression-cancel"].forEach(id => document.getElementById(id)?.addEventListener("click", () => tagExpressionModal.classList.add("hidden")));
+
+document.getElementById("tag-add-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  const name = prompt("Internal tag name (for example: ProductionCount)");
+  if (!name) return;
+  const datatype = prompt("Data type: bool, int, float, string", "bool") || "bool";
+  const description = prompt("Description", "") || "";
+  send({ action: "add_tag", name, datatype, description, value: datatype === "bool" ? false : 0, writable: true });
+  markDirty();
+});
+
 function writableIoPoints() {
   const rows = [];
   for (const [tag, obj] of Object.entries(latestState)) {
     const points = obj._io_points || {};
     for (const [point, writable] of Object.entries(points)) {
-      if (writable) rows.push({ tag, point, label: `${tag} → ${point}` });
+      if (writable) rows.push({ tag, point, label: `${tag} → ${point}`, value: `${tag}|${point}` });
     }
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label));
@@ -677,13 +980,25 @@ function readableIoPoints() {
   const rows = [];
   for (const [tag, obj] of Object.entries(latestState)) {
     const points = obj._io_points || {};
-    for (const point of Object.keys(points)) rows.push({ tag, point, label: `${tag} → ${point}` });
+    for (const point of Object.keys(points)) rows.push({ tag, point, label: `${tag} → ${point}`, value: `${tag}|${point}` });
+  }
+  // Internal/derived tags (unconnected custom tags, incl. ones driven by
+  // an fx expression) can also feed a rule's IF condition, so a computed
+  // multi-tag expression can end up driving a real actuator.
+  for (const t of latestTags) {
+    if (!t.system) rows.push({ tag: t.name, point: null, label: `🏷 ${t.name}`, value: `T:${t.name}` });
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function logicPairFromValue(value) {
+  if (value.startsWith("T:")) return { tag_name: value.slice(2) };
+  const [tag, point] = value.split("|");
+  return { object_tag: tag, io_point: point };
+}
+
 function logicSelect(options, selected) {
-  return `<select>${options.map(o => `<option value="${o.tag}|${o.point}" ${`${o.tag}|${o.point}` === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
+  return `<select>${options.map(o => `<option value="${o.value}" ${o.value === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
 }
 
 function renderLogicRules() {
@@ -692,7 +1007,7 @@ function renderLogicRules() {
   const sources = readableIoPoints();
   const destinations = writableIoPoints();
   list.innerHTML = latestLogicRules.map((rule, i) => {
-    const src = `${rule.source?.object_tag || ""}|${rule.source?.io_point || ""}`;
+    const src = rule.source?.tag_name ? `T:${rule.source.tag_name}` : `${rule.source?.object_tag || ""}|${rule.source?.io_point || ""}`;
     const dst = `${rule.destination?.object_tag || ""}|${rule.destination?.io_point || ""}`;
     const enabled = rule.enabled !== false;
     return `<div class="mapping-card logic-rule" data-index="${i}">
@@ -731,11 +1046,10 @@ function renderLogicRules() {
     const i = Number(card.dataset.index);
     const rule = latestLogicRules[i];
     const selects = card.querySelectorAll("select");
-    const readPair = value => { const [tag, point] = value.split("|"); return { object_tag: tag, io_point: point }; };
     const changed = () => {
       const [sourceSel, opSel, destSel] = [selects[0], selects[1], selects[2]];
       // opSel is actually the second select; source/destination are 0/2.
-      rule.source = readPair(sourceSel.value); rule.operator = opSel.value; rule.destination = readPair(destSel.value);
+      rule.source = logicPairFromValue(sourceSel.value); rule.operator = opSel.value; rule.destination = logicPairFromValue(destSel.value);
       rule.value = card.querySelector(".logic-value").value;
       rule.delay_ms = Number(card.querySelector(".logic-delay-ms").value || 0);
       rule.true_value = card.querySelector(".logic-true-value").value;
@@ -756,7 +1070,7 @@ document.getElementById("logic-add-btn")?.addEventListener("click", () => {
   if (!isDesignMode()) return;
   const sources = readableIoPoints(), destinations = writableIoPoints();
   if (!sources.length || !destinations.length) { alert("Create at least one readable and one writable I/O point first."); return; }
-  latestLogicRules.push({ enabled: true, operator: "truthy", source: { object_tag: sources[0].tag, io_point: sources[0].point }, destination: { object_tag: destinations[0].tag, io_point: destinations[0].point }, value: "", delay_ms: 0, true_value: true, false_value: false });
+  latestLogicRules.push({ enabled: true, operator: "truthy", source: logicPairFromValue(sources[0].value), destination: logicPairFromValue(destinations[0].value), value: "", delay_ms: 0, true_value: true, false_value: false });
   markDirty(); send({ action: "set_logic_rules", rules: latestLogicRules }); renderLogicRules();
 });
 
@@ -1701,158 +2015,150 @@ document.getElementById("monitor-filter")?.addEventListener("input", () => {
 let mappingRowsKey = null;
 let mappingCells = {}; // "tag|point" -> { nodeInput, liveCell }
 
+function mappingIdentity(row) {
+  // Must produce exactly the same key as mappingEntryKey() below, which is
+  // built from the *saved* mapping entry's own fields (tag_name/point for
+  // internal tags, object_tag/io_point for system tags). Using row.tag here
+  // is wrong for system rows: row.tag is the tag registry's compound name
+  // ("Conveyor_1.running"), not the bare object tag, so `${row.tag}|${row.point}`
+  // never matched a saved entry's `${object_tag}|${io_point}` key -- every
+  // system-tag address showed up blank in the Mapping tab even though it
+  // was saved correctly (and visible in PLC Monitor, which doesn't go
+  // through this lookup).
+  return row.tag_name ? `${row.tag_name}|${row.point}` : `${row.object_tag}|${row.io_point}`;
+}
+
+function allMappingRows() {
+  const rows = [];
+  for (const tag of latestTags) {
+    if (tag.system) {
+      rows.push({
+        tag: tag.name,
+        point: tag.io_point || "value",
+        object_tag: tag.object_tag,
+        io_point: tag.io_point,
+        tag_name: null,
+        isPlcToOms: tag.direction === "PLC -> OMS",
+        datatype: tag.datatype,
+        source: `${tag.object_tag}.${tag.io_point}`,
+        internal: false,
+      });
+    } else {
+      rows.push({
+        tag: tag.name,
+        point: tag.object_tag && tag.io_point ? `${tag.object_tag}.${tag.io_point}` : "Internal",
+        object_tag: tag.object_tag || null,
+        io_point: tag.io_point || null,
+        tag_name: tag.name,
+        isPlcToOms: tag.direction === "PLC -> OMS" || tag.direction === "Internal",
+        datatype: tag.datatype,
+        source: tag.object_tag && tag.io_point ? `Connected to ${tag.object_tag}.${tag.io_point}` : "Internal tag",
+        internal: true,
+      });
+    }
+  }
+  return rows.sort((a, b) => `${a.tag}.${a.point}`.localeCompare(`${b.tag}.${b.point}`));
+}
+
 function renderMappingTable(plc, state) {
   const tbody = document.getElementById("mapping-tbody");
   const grouping = document.getElementById("mapping-group").checked;
-
-  const rows = [];
-  for (const tag of Object.keys(state).sort()) {
-    const obj = state[tag];
-    if (!obj._io_points) continue;
-    for (const point of Object.keys(obj._io_points).sort()) {
-      rows.push({ tag, point, isPlcToOms: obj._io_points[point] });
-    }
-  }
-
-  const key = grouping + "|" + rows.map((r) => `${r.tag}.${r.point}`).join(",");
+  const rows = allMappingRows();
+  // Include the saved mapping list (PLC node addresses) in the fingerprint,
+  // not just the tag/row set -- otherwise, when a project loads and the
+  // addresses arrive in a later message than the (unchanged) tag list, the
+  // key never changes and buildMappingRows() never reruns, leaving the
+  // table showing empty addresses even though plc.mapping is now correct.
+  const key = grouping + "|" + rows.map(mappingIdentity).join(",") + "|" + JSON.stringify(plc.mapping || []);
   if (key !== mappingRowsKey) {
     mappingRowsKey = key;
     buildMappingRows(tbody, rows, plc.mapping || [], grouping);
   }
 
-  for (const [k, cells] of Object.entries(mappingCells)) {
-    const [tag, point] = k.split("|");
-    const val = state[tag]?.[point];
-    cells.liveCell.textContent = val === undefined ? "—" : String(val);
+  for (const cells of Object.values(mappingCells)) {
+    const row = cells.row;
+    const tag = row.tag_name
+      ? latestTags.find(t => t.name === row.tag_name)
+      : latestTags.find(t => t.object_tag === row.object_tag && t.io_point === row.io_point);
+    const value = tag ? tag.value : undefined;
+    cells.liveCell.textContent = value === undefined ? "—" : String(value);
   }
-
   applyMappingFilter();
+}
+
+function mappingEntryKey(m) {
+  return m.tag_name ? `${m.tag_name}|${m.point || "value"}` : `${m.object_tag}|${m.io_point}`;
 }
 
 function buildMappingRows(tbody, rows, mappingList, grouping) {
   const nodeByKey = {};
-  for (const m of mappingList) {
-    nodeByKey[`${m.object_tag}|${m.io_point}`] = m.plc_node;
-  }
+  for (const m of mappingList) nodeByKey[mappingEntryKey(m)] = m.plc_node;
 
   tbody.innerHTML = "";
   mappingCells = {};
-
   let lastTag = null;
 
   for (const row of rows) {
-
-    // ---------- Object group header ----------
     if (grouping && row.tag !== lastTag) {
       const headerRow = document.createElement("div");
       headerRow.className = "mapping-group-header";
       headerRow.dataset.groupTag = row.tag;
-
-      headerRow.innerHTML = `
-        <span class="group-arrow">▼</span><span class="group-header-label">${row.tag}</span>
-      `;
-
+      headerRow.innerHTML = `<span class="group-arrow">▼</span><span class="group-header-label">${escapeHtml(row.tag)}</span>`;
       headerRow.addEventListener("click", () => {
         const collapsed = headerRow.classList.toggle("collapsed");
-
-        const arrow = headerRow.querySelector(".group-arrow");
-        arrow.textContent = collapsed ? "▶" : "▼";
-
-        // Hide/show all rows belonging to this object
+        headerRow.querySelector(".group-arrow").textContent = collapsed ? "▶" : "▼";
         let sib = headerRow.nextElementSibling;
-
         while (sib && !sib.classList.contains("mapping-group-header")) {
           sib.style.display = collapsed ? "none" : "";
           sib = sib.nextElementSibling;
         }
-
-        // Re-apply the search filter without losing collapse state
         applyMappingFilter();
       });
-
       tbody.appendChild(headerRow);
       lastTag = row.tag;
     }
 
-    // ---------- Mapping card ----------
-    const key = `${row.tag}|${row.point}`;
+    const key = mappingIdentity(row);
     const nodeValue = nodeByKey[key] || "";
-    const direction = row.isPlcToOms ? "PLC -> OMS" : "OMS -> PLC";
-
+    const direction = row.internal
+      ? (row.isPlcToOms && row.object_tag ? row.isPlcToOms ? "PLC → OMS" : "Internal" : "Internal")
+      : (row.isPlcToOms ? "PLC → OMS" : "OMS → PLC");
     const tr = document.createElement("div");
-
     tr.className = "mapping-card";
     tr.dataset.groupTag = row.tag;
     tr.classList.toggle("unmapped-row", !nodeValue);
-
     tr.innerHTML = `
-      <div class="mapping-card-top" title="${row.tag} / ${row.point}">
-        <span class="mapping-card-object">${row.tag}</span>
-        <span class="mapping-card-point">${row.point}</span>
+      <div class="mapping-card-top" title="${escapeHtml(row.source)}">
+        <span class="mapping-card-object">${escapeHtml(row.tag)}</span>
+        <span class="mapping-card-point">${escapeHtml(row.point)}</span>
         <span class="mapping-card-direction">${direction}</span>
       </div>
       <div class="node-input-wrap">
-        <input type="text" class="node-input">
-        <button type="button" class="browse-node-btn" title="Browse available PLC tags">⌕</button>
+        <input type="text" class="node-input" placeholder="PLC address / node">
+        <button type="button" class="browse-node-btn" title="Search parsed PLC addresses">⌕</button>
       </div>
       <span class="mapping-card-live" title="Live value"><span class="live-value">—</span></span>
-      ${row.isPlcToOms
-        ? '<span class="force-cell"><input type="text" class="force-input" placeholder="value"></span>'
-        : '<span class="force-cell force-empty">—</span>'}
-    `;
+      ${row.isPlcToOms ? '<span class="force-cell"><input type="text" class="force-input" placeholder="value"></span>' : '<span class="force-cell force-empty">—</span>'}`;
 
     const nodeInput = tr.querySelector(".node-input");
-
     nodeInput.value = nodeValue;
+    nodeInput.addEventListener("input", () => tr.classList.toggle("unmapped-row", !nodeInput.value.trim()));
+    nodeInput.addEventListener("keydown", e => { if (e.key === "Enter") applyAllMappings(); });
+    nodeInput.addEventListener("blur", applyAllMappings);
+    tr.querySelector(".browse-node-btn").addEventListener("click", () => openTagPicker(nodeInput));
 
-    nodeInput.addEventListener("input", () => {
-      tr.classList.toggle("unmapped-row", !nodeInput.value.trim());
-    });
-
-    nodeInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        applyAllMappings();
-      }
-    });
-
-    nodeInput.addEventListener("blur", () => {
-      applyAllMappings();
-    });
-
-    tr.querySelector(".browse-node-btn").addEventListener("click", () => {
-      openTagPicker(nodeInput);
-    });
-
-    // Force value using ENTER
     if (row.isPlcToOms) {
       const forceInput = tr.querySelector(".force-input");
-
       const applyForce = () => {
         const value = forceInput.value.trim();
-
         if (!value) return;
-
-        send({
-          action: "plc_force",
-          tag_name: row.tag,
-          io_point: row.point,
-          value,
-        });
+        if (row.internal) send({ action: "plc_force_tag", name: row.tag, value });
+        else send({ action: "plc_force", tag_name: row.object_tag, io_point: row.io_point, value });
       };
-
-      forceInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          applyForce();
-        }
-      });
+      forceInput.addEventListener("keydown", e => { if (e.key === "Enter") applyForce(); });
     }
-
     tbody.appendChild(tr);
-
-    mappingCells[key] = {
-      nodeInput,
-      liveCell: tr.querySelector(".live-value"),
-    };
+    mappingCells[key] = { nodeInput, liveCell: tr.querySelector(".live-value"), row };
   }
 }
 
@@ -1990,10 +2296,13 @@ document.getElementById("mapping-rescan-btn").addEventListener("click", () => {
 function applyAllMappings() {
   markDirty();
   const mappings = [];
-  for (const [key, cells] of Object.entries(mappingCells)) {
-    const [tag, point] = key.split("|");
+  for (const cells of Object.values(mappingCells)) {
     const value = cells.nodeInput.value.trim();
-    if (value) mappings.push({ object_tag: tag, io_point: point, plc_node: value });
+    if (!value) continue;
+    const row = cells.row;
+    mappings.push(row.internal
+      ? { tag_name: row.tag, point: row.point, object_tag: row.object_tag, io_point: row.io_point, plc_node: value }
+      : { object_tag: row.object_tag, io_point: row.io_point, plc_node: value });
   }
   send({ action: "plc_set_mapping", mappings });
 }

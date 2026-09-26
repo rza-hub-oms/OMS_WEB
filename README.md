@@ -70,7 +70,7 @@ The tests cover conveyor reverse motion, elapsed-time simulation, typed signals,
 
 ## Project files
 
-`.oms` files are JSON documents. Current project format version is **3**. Older project files are migrated in memory when opened.
+`.oms` files are JSON documents. Current project format version is **6**. Older project files are migrated in memory when opened.
 
 ## Frontend structure
 
@@ -84,3 +84,12 @@ Use Python's standard logging system rather than ad-hoc `print()` calls. PLC dia
 ## Sequence Control (v4)
 
 Simulation mode now includes a deterministic step/transition sequence engine. A sequence contains ordered steps with output actions, I/O-based transitions, optional timeouts, timeout behavior (`fault`, `stop`, or `advance`), and `once`/`continuous` cycle modes. Sequences are simulation-only and are never executed in Runtime mode; the live PLC remains the Runtime source of truth.
+
+
+## Central Tag System (v6)
+
+OMS now exposes one central tag registry for machine I/O and internal variables.
+Component signals are represented as stable tags such as `Conveyor_1.running`
+and `Motor_1.speed`. Internal tags can be created from the Tags panel and are
+persisted in `.oms` projects. The registry is the common data contract for
+future alarms, trends, Runtime and richer PLC mapping.

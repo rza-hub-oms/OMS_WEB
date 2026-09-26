@@ -21,6 +21,7 @@ from core.components.tower_light import TowerLightBehavior
 from core.components.label import LabelBehavior
 from core.logic import LogicEngine
 from core.sequence import SequenceEngine
+from core.tags import TagRegistry
 
 # Maps a serialized "type" string to its behavior class. Extend this as
 # more components are ported (toggle_switch, tower_light, etc.).
@@ -136,6 +137,7 @@ class Scene:
         self.logic_engine = LogicEngine(self)
         self.sequences = []
         self.sequence_engine = SequenceEngine(self)
+        self.tags = TagRegistry(self)
 
     def add(self, obj) -> None:
         """Add a component to the scene, keyed by its tag_name."""
@@ -146,6 +148,7 @@ class Scene:
         if tag_name not in self.objects:
             return False
         del self.objects[tag_name]
+        self.tags.remove_object(tag_name)
         # Keep PLC mappings consistent when a component is deleted.
         self.plc_mapping = [
             mapping for mapping in self.plc_mapping
@@ -172,6 +175,7 @@ class Scene:
         del self.objects[tag_name]
         obj.tag_name = new_name
         self.objects[new_name] = obj
+        self.tags.rename_object(tag_name, new_name)
 
         for mapping in self.plc_mapping:
             if mapping.get("object_tag") == tag_name:
@@ -199,6 +203,7 @@ class Scene:
 
         obj = behavior_cls(tag_name, x=x, y=y)
         self.add(obj)
+        self.tags.sync()
         return obj
 
     def is_emergency_stopped(self) -> bool:
@@ -221,6 +226,8 @@ class Scene:
         backend call instead of one delete_component message per
         component."""
         self.objects.clear()
+        self.tags.custom.clear()
+        self.tags.sync()
         self._type_counters.clear()
         self._cylinder_previously_extended.clear()
         self.plc_mapping.clear()
@@ -277,6 +284,10 @@ class Scene:
         if logic_enabled:
             self.logic_engine.apply(self.logic_rules, dt_ms)
             self.sequence_engine.apply(self.sequences, dt_ms)
+
+        # Derived internal tags are evaluated last so they see the final
+        # component/logic state of this simulation tick.
+        self.tags.evaluate_expressions()
 
     def _handle_cylinder_relations(self) -> None:
         """Runs each fully-extended cylinder's physical relation (see
@@ -450,20 +461,49 @@ class Scene:
         return errors
 
     def signal_catalog(self) -> list:
-        """Return the typed signal catalog used by the PLC mapping UI."""
+        """Return component signals through the central tag registry."""
+        self.tags.sync()
+        return [
+            {
+                "object_tag": tag.object_tag,
+                "io_point": tag.io_point,
+                "tag": tag.name,
+                "direction": tag.direction,
+                "datatype": tag.datatype,
+                "description": tag.description,
+            }
+            for tag in self.tags.all()
+            if tag.system
+        ]
+
+    def tag_catalog(self) -> list:
+        """Return the complete central OMS tag catalog with live values."""
         rows = []
-        for tag_name in sorted(self.objects):
-            obj = self.objects[tag_name]
-            signals = obj.get_io_signals()
-            for signal in sorted(signals, key=lambda s: s.name):
-                rows.append({
-                    "object_tag": tag_name,
-                    "io_point": signal.name,
-                    "direction": signal.direction,
-                    "datatype": signal.datatype.__name__ if signal.datatype else None,
-                    "description": signal.description,
-                })
-        return rows
+        for tag in self.tags.all():
+            item = tag.to_dict()
+            item["value"] = self.tags.read(tag.name)
+            item["expression"] = tag.expression
+            item["expression_error"] = tag.expression_error
+            rows.append(item)
+        return sorted(rows, key=lambda row: row["name"])
+
+    def set_tag(self, name: str, value) -> bool:
+        return self.tags.write(name, value)
+
+    def add_tag(self, name: str, datatype="bool", value=False, description="", writable=True):
+        return self.tags.add_custom(name, datatype, value, description, writable)
+
+    def remove_tag(self, name: str) -> bool:
+        return self.tags.remove_custom(name)
+
+    def set_tag_expression(self, name: str, expression: str) -> bool:
+        return self.tags.set_expression(name, expression)
+
+    def bind_tag(self, name: str, object_tag: str, io_point: str) -> bool:
+        return self.tags.bind_custom(name, object_tag, io_point)
+
+    def unbind_tag(self, name: str) -> bool:
+        return self.tags.unbind_custom(name)
 
     def io_points_catalog(self) -> list:
         """Every (object_tag, io_point, direction) triple currently in
