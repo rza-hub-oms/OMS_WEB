@@ -123,6 +123,8 @@
       <div class="tabs">
         <button type="button" class="tab active" data-tab="properties">Properties</button>
         <button type="button" class="tab" data-tab="plc">PLC Mapping</button>
+        <button type="button" class="tab" data-tab="logic">Logic</button>
+        <button type="button" class="tab" data-tab="sequences">Sequences</button>
         <button type="button" class="tab" data-tab="monitor">PLC Monitor</button>
         <button type="button" class="tab" data-tab="components">Components</button>
       </div>
@@ -165,6 +167,24 @@
           </div>
           <div id="mapping-tbody" class="mapping-card-list"></div>
         </div>
+      </div>
+      <div id="logic-tab" class="tab-panel" data-panel="logic">
+        <div class="mapping-actions">
+          <button id="logic-add-btn" title="Add Rule">＋</button>
+          <button id="logic-validate-btn" title="Validate Rules">✓</button>
+        </div>
+        <p class="hint">Simulation only. Example: Sensor detected → Cylinder extend.</p>
+        <div id="logic-rules-list" class="mapping-card-list"></div>
+      </div>
+      <div id="sequences-tab" class="tab-panel" data-panel="sequences">
+        <div class="mapping-actions">
+          <button id="sequence-add-btn" title="Add Sequence">＋</button>
+          <button id="sequence-validate-btn" title="Validate Sequences">✓</button>
+          <button id="sequence-reset-btn" title="Reset sequence runtime">↺</button>
+        </div>
+        <p class="hint">Simulation only. Each step executes its actions, then advances when its transition becomes true. Timeouts can fault, stop, or advance.</p>
+        <div id="sequence-list" class="mapping-card-list"></div>
+        <div id="sequence-status-list" class="mapping-card-list"></div>
       </div>
       <div id="monitor-tab" class="tab-panel" data-panel="monitor">
         <div class="monitor-summary">
@@ -285,6 +305,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=10"></script>
+  <script type="module" src="app.js?v=11"></script>
 </body>
 </html>

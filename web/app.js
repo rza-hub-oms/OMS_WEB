@@ -249,6 +249,9 @@ canvasWrap.addEventListener(
 );
 
 let latestState = {};
+let latestLogicRules = [];
+let latestSequences = [];
+let latestSequenceStatus = [];
 // Cache of created DOM elements per tag_name, so we update in place
 // instead of rebuilding the DOM every 50ms (which would restart CSS
 // transitions/animations and cause flicker).
@@ -279,6 +282,7 @@ updateModeUI();
 // match their state key.
 const PROPERTY_FIELDS = {
   conveyor: [
+    { key: "mode", send: "mode", label: "Mode", type: "select", options: [["auto", "Auto"], ["manual", "Manual"]] },
     { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Width", type: "number", min: 30, max: 5000, suffix: " px" },
@@ -291,8 +295,11 @@ const PROPERTY_FIELDS = {
     { key: "box_height", send: "box_height", label: "Box Height", type: "number", min: 5, maxKey: "max_box_height", suffix: " px" },
     { key: "box_count", send: "box_count", label: "Box Count", type: "number", min: 1, step: "1", maxKey: "max_box_count" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+    { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
+    { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
   ],
   cylinder: [
+    { key: "mode", send: "mode", label: "Mode", type: "select", options: [["auto", "Auto"], ["manual", "Manual"]] },
     { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Width", type: "number", min: 40, max: 1000, suffix: " px" },
@@ -305,10 +312,13 @@ const PROPERTY_FIELDS = {
     // (core/scene.py) currently has a handler for. Add a type here only
     // once its handler exists server-side -- offering a target with no
     // handler would let it be selected but silently do nothing.
-    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor"] },
+    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor", "sensor", "push_button"] },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+    { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
+    { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
   ],
   motor: [
+    { key: "mode", send: "mode", label: "Mode", type: "select", options: [["auto", "Auto"], ["manual", "Manual"]] },
     { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Width", type: "number", min: 30, max: 5000, suffix: " px" },
@@ -318,6 +328,8 @@ const PROPERTY_FIELDS = {
       options: [["1", "Forward"], ["0", "Reverse"]] },
     { key: "speed", send: "speed", label: "Speed", type: "number", min: 0, max: 5000, suffix: " mm/s" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1" , min: "0" },
+    { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
+    { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
   ],
   sensor: [
     { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
@@ -375,9 +387,9 @@ const PROPERTY_FIELDS = {
 
 // Read-only telemetry shown above the editable fields.
 const STATUS_FIELDS = {
-  conveyor: [["running", "Running"]],
-  cylinder: [["extended", "Extended"], ["progress", "Progress"], ["moving", "Moving"]],
-  motor: [["running", "Running"]],
+  conveyor: [["running", "Running"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
+  cylinder: [["extended", "Extended"], ["progress", "Progress"], ["moving", "Moving"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
+  motor: [["running", "Running"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   sensor: [["detected", "Detected"]],
   push_button: [["pressed", "Pressed"]],
   emergency_push_button: [["pressed", "Pressed"]],
@@ -495,7 +507,7 @@ function renderPropertyPanel() {
         return `<label>${f.label}<input type="text" data-send="${f.send}" value="${val}"></label>`;
       }
       if (f.type === "checkbox") {
-        return `<label class="checkbox-field"><input type="checkbox" data-send="${f.send}" ${obj[f.key] ? "checked" : ""}> ${f.label}</label>`;
+        return `<label class="checkbox-field">${f.label}<input type="checkbox" data-send="${f.send}" ${obj[f.key] ? "checked" : ""}></label>`;
       }
       if (f.type === "color") {
         return `<label>${f.label}<input type="color" data-send="${f.send}" value="${obj[f.key]}"></label>`;
@@ -587,6 +599,18 @@ setMessageHandler((event) => {
 
   // One-off reply to a "plc_validate" command, not part of the
   // regular tick broadcast (which always has an "objects" key).
+  if (msg.logic_validation !== undefined) {
+    const errors = msg.logic_validation || [];
+    alert(errors.length ? errors.map(e => `Rule ${e.index + 1}: ${e.error}`).join("\n") : "Logic rules are valid.");
+    return;
+  }
+
+  if (msg.sequence_validation !== undefined) {
+    const errors = msg.sequence_validation || [];
+    alert(errors.length ? errors.map(e => `Sequence ${e.index + 1}${e.step !== undefined ? ` / Step ${e.step + 1}` : ""}: ${e.error}`).join("\n") : "Sequences are valid.");
+    return;
+  }
+
   if (msg.plc_validation !== undefined) {
     showValidationResult(msg.plc_validation);
     return;
@@ -619,12 +643,250 @@ setMessageHandler((event) => {
 
   latestState = msg.objects || {};
   latestPlc = msg.plc || {};
+  if (msg.logic_rules && JSON.stringify(msg.logic_rules) !== JSON.stringify(latestLogicRules)) {
+    latestLogicRules = msg.logic_rules;
+    renderLogicRules();
+  }
+  if (msg.sequences && JSON.stringify(msg.sequences) !== JSON.stringify(latestSequences)) {
+    latestSequences = msg.sequences;
+    renderSequences();
+  }
+  if (msg.sequence_status) {
+    latestSequenceStatus = msg.sequence_status;
+    renderSequenceStatus();
+  }
   render(latestState);
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
   renderPlcMonitor(latestPlc, latestState);
   updateRuntimeAlarmBar();
 });
+
+function writableIoPoints() {
+  const rows = [];
+  for (const [tag, obj] of Object.entries(latestState)) {
+    const points = obj._io_points || {};
+    for (const [point, writable] of Object.entries(points)) {
+      if (writable) rows.push({ tag, point, label: `${tag} → ${point}` });
+    }
+  }
+  return rows.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function readableIoPoints() {
+  const rows = [];
+  for (const [tag, obj] of Object.entries(latestState)) {
+    const points = obj._io_points || {};
+    for (const point of Object.keys(points)) rows.push({ tag, point, label: `${tag} → ${point}` });
+  }
+  return rows.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function logicSelect(options, selected) {
+  return `<select>${options.map(o => `<option value="${o.tag}|${o.point}" ${`${o.tag}|${o.point}` === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
+}
+
+function renderLogicRules() {
+  const list = document.getElementById("logic-rules-list");
+  if (!list) return;
+  const sources = readableIoPoints();
+  const destinations = writableIoPoints();
+  list.innerHTML = latestLogicRules.map((rule, i) => {
+    const src = `${rule.source?.object_tag || ""}|${rule.source?.io_point || ""}`;
+    const dst = `${rule.destination?.object_tag || ""}|${rule.destination?.io_point || ""}`;
+    const enabled = rule.enabled !== false;
+    return `<div class="mapping-card logic-rule" data-index="${i}">
+      <span class="logic-rule-num">RULE ${i + 1}</span>
+      <button class="logic-delete" type="button" title="Delete rule">✕</button>
+      <div class="logic-rule-head">
+        <label class="logic-toggle" title="Enable/disable rule">
+          <input class="logic-enabled" type="checkbox" ${enabled ? "checked" : ""}>
+          <span class="logic-toggle-slider"></span>
+        </label>
+        <span class="logic-toggle-label">${enabled ? "Enabled" : "Disabled"}</span>
+      </div>
+      <div class="logic-rule-row logic-rule-if">
+        <span class="logic-rule-tag">IF</span>
+        ${logicSelect(sources, src)}
+        <select class="logic-op">
+          <option value="truthy" ${rule.operator === "truthy" ? "selected" : ""}>is ON</option>
+          <option value="equals" ${rule.operator === "equals" ? "selected" : ""}>equals</option>
+          <option value="not_equals" ${rule.operator === "not_equals" ? "selected" : ""}>not equals</option>
+          <option value="rising" ${rule.operator === "rising" ? "selected" : ""}>rising edge</option>
+          <option value="falling" ${rule.operator === "falling" ? "selected" : ""}>falling edge</option>
+        </select>
+        <input class="logic-value" type="text" placeholder="compare value" value="${rule.value ?? ""}">
+        <label class="logic-delay">Delay <input class="logic-delay-ms" type="number" min="0" max="30000" step="50" value="${rule.delay_ms ?? 0}"> ms</label>
+      </div>
+      <div class="logic-rule-row logic-rule-then">
+        <span class="logic-rule-tag logic-rule-tag-then">THEN SET</span>
+        ${logicSelect(destinations, dst)}
+        <label class="logic-output">ON <input class="logic-true-value" type="text" value="${rule.true_value ?? true}"></label>
+        <label class="logic-output">OFF <input class="logic-false-value" type="text" value="${rule.false_value ?? false}"></label>
+      </div>
+    </div>`;
+  }).join("") || '<p class="empty">No rules. Add a rule to connect simulated I/O.</p>';
+
+  list.querySelectorAll(".logic-rule").forEach(card => {
+    const i = Number(card.dataset.index);
+    const rule = latestLogicRules[i];
+    const selects = card.querySelectorAll("select");
+    const readPair = value => { const [tag, point] = value.split("|"); return { object_tag: tag, io_point: point }; };
+    const changed = () => {
+      const [sourceSel, opSel, destSel] = [selects[0], selects[1], selects[2]];
+      // opSel is actually the second select; source/destination are 0/2.
+      rule.source = readPair(sourceSel.value); rule.operator = opSel.value; rule.destination = readPair(destSel.value);
+      rule.value = card.querySelector(".logic-value").value;
+      rule.delay_ms = Number(card.querySelector(".logic-delay-ms").value || 0);
+      rule.true_value = card.querySelector(".logic-true-value").value;
+      rule.false_value = card.querySelector(".logic-false-value").value;
+      rule.enabled = card.querySelector(".logic-enabled").checked;
+      markDirty(); send({ action: "set_logic_rules", rules: latestLogicRules });
+    };
+    card.querySelectorAll("select,input").forEach(el => el.addEventListener("change", changed));
+    card.querySelector(".logic-enabled")?.addEventListener("change", e => {
+      const label = card.querySelector(".logic-toggle-label");
+      if (label) label.textContent = e.target.checked ? "Enabled" : "Disabled";
+    });
+    card.querySelector(".logic-delete")?.addEventListener("click", () => { latestLogicRules.splice(i, 1); markDirty(); send({ action: "set_logic_rules", rules: latestLogicRules }); renderLogicRules(); });
+  });
+}
+
+document.getElementById("logic-add-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  const sources = readableIoPoints(), destinations = writableIoPoints();
+  if (!sources.length || !destinations.length) { alert("Create at least one readable and one writable I/O point first."); return; }
+  latestLogicRules.push({ enabled: true, operator: "truthy", source: { object_tag: sources[0].tag, io_point: sources[0].point }, destination: { object_tag: destinations[0].tag, io_point: destinations[0].point }, value: "", delay_ms: 0, true_value: true, false_value: false });
+  markDirty(); send({ action: "set_logic_rules", rules: latestLogicRules }); renderLogicRules();
+});
+
+document.getElementById("logic-validate-btn")?.addEventListener("click", () => send({ action: "validate_logic" }));
+
+function sequenceSelect(options, selected) {
+  return `<select class="sequence-select">${options.map(o => `<option value="${o.tag}|${o.point}" ${`${o.tag}|${o.point}` === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
+}
+
+function parseSequenceValue(value) {
+  const v = String(value ?? "").trim();
+  if (v === "true" || v === "on") return true;
+  if (v === "false" || v === "off") return false;
+  if (v !== "" && !Number.isNaN(Number(v))) return Number(v);
+  return v;
+}
+
+function renderSequences() {
+  const list = document.getElementById("sequence-list");
+  if (!list) return;
+  const sources = readableIoPoints();
+  const destinations = writableIoPoints();
+  list.innerHTML = latestSequences.map((seq, si) => {
+    const steps = seq.steps || [];
+    return `<div class="mapping-card sequence-card" data-index="${si}" data-seq-id="${seq.id || `sequence_${si + 1}`}">
+      <div class="sequence-head">
+        <input class="sequence-name" value="${seq.name || `Sequence ${si + 1}`}" placeholder="Sequence name">
+        <label><input class="sequence-enabled" type="checkbox" ${seq.enabled !== false ? "checked" : ""}> Enabled</label>
+        <label><input class="sequence-auto" type="checkbox" ${seq.auto_start !== false ? "checked" : ""}> Auto start</label>
+        <select class="sequence-cycle"><option value="once" ${seq.cycle !== "continuous" ? "selected" : ""}>Once</option><option value="continuous" ${seq.cycle === "continuous" ? "selected" : ""}>Continuous</option></select>
+        <button class="sequence-delete" type="button">✕</button>
+      </div>
+      <div class="sequence-steps">${steps.map((step, pi) => {
+        const tr = step.transition || {};
+        const trSel = `${tr.object_tag || ""}|${tr.io_point || ""}`;
+        const action = (step.actions || [])[0] || { destination: { object_tag: destinations[0]?.tag || "", io_point: destinations[0]?.point || "" }, value: true };
+        const actSel = `${action.destination?.object_tag || ""}|${action.destination?.io_point || ""}`;
+        return `<div class="sequence-step" data-step="${pi}">
+          <div class="sequence-step-title"><b>STEP ${pi + 1}</b><input class="step-name" value="${step.name || `Step ${pi + 1}`}" placeholder="Step name"><button class="step-delete" type="button">✕</button></div>
+          <div class="sequence-row"><span>DO</span>${sequenceSelect(destinations, actSel)}<input class="step-value" value="${action.value ?? true}" title="Output value"></div>
+          <div class="sequence-row"><span>WAIT UNTIL</span>${sequenceSelect(sources, trSel)}<select class="step-op"><option value="truthy" ${tr.operator === "truthy" ? "selected" : ""}>is ON</option><option value="equals" ${tr.operator === "equals" ? "selected" : ""}>equals</option><option value="not_equals" ${tr.operator === "not_equals" ? "selected" : ""}>not equals</option><option value="rising" ${tr.operator === "rising" ? "selected" : ""}>rising</option><option value="falling" ${tr.operator === "falling" ? "selected" : ""}>falling</option></select><input class="step-condition-value" value="${tr.value ?? ""}" placeholder="value"></div>
+          <div class="sequence-row"><span>TIMEOUT</span><input class="step-timeout" type="number" min="0" step="50" value="${step.timeout_ms || 0}"> ms<select class="step-timeout-mode"><option value="fault" ${step.on_timeout !== "advance" && step.on_timeout !== "stop" ? "selected" : ""}>Fault</option><option value="stop" ${step.on_timeout === "stop" ? "selected" : ""}>Stop</option><option value="advance" ${step.on_timeout === "advance" ? "selected" : ""}>Advance</option></select></div>
+        </div>`;
+      }).join("")}</div>
+      <button class="sequence-add-step" type="button">＋ Add step</button>
+    </div>`;
+  }).join("") || '<p class="empty">No sequences. Add one to build a machine cycle.</p>';
+  highlightActiveSteps();
+
+  list.querySelectorAll(".sequence-card").forEach(card => {
+    const si = Number(card.dataset.index), seq = latestSequences[si];
+    const readPair = value => { const [tag, point] = value.split("|"); return { object_tag: tag, io_point: point }; };
+    // Pulls current form values into the in-memory model. Split out from
+    // save() so the step-delete handler can sync fields BEFORE mutating
+    // seq.steps -- syncing after a splice would iterate the (still full)
+    // old step-card DOM against a now-shorter array and throw on the
+    // last card, silently aborting the whole click (that was the bug:
+    // the X button appeared to do nothing).
+    const syncFields = () => {
+      seq.name = card.querySelector(".sequence-name").value;
+      seq.enabled = card.querySelector(".sequence-enabled").checked;
+      seq.auto_start = card.querySelector(".sequence-auto").checked;
+      seq.cycle = card.querySelector(".sequence-cycle").value;
+      card.querySelectorAll(".sequence-step").forEach((stepCard, pi) => {
+        const step = seq.steps[pi];
+        if (!step) return;
+        const selects = stepCard.querySelectorAll(".sequence-select");
+        step.name = stepCard.querySelector(".step-name").value;
+        const act = readPair(selects[0].value), tr = readPair(selects[1].value);
+        step.actions = [{ destination: act, value: parseSequenceValue(stepCard.querySelector(".step-value").value) }];
+        step.transition = { ...tr, operator: stepCard.querySelector(".step-op").value, value: parseSequenceValue(stepCard.querySelector(".step-condition-value").value) };
+        step.timeout_ms = Number(stepCard.querySelector(".step-timeout").value || 0);
+        step.on_timeout = stepCard.querySelector(".step-timeout-mode").value;
+      });
+    };
+    const save = () => { syncFields(); markDirty(); send({ action: "set_sequences", sequences: latestSequences }); };
+    card.querySelectorAll("input,select").forEach(el => el.addEventListener("change", save));
+    card.querySelector(".sequence-delete")?.addEventListener("click", () => { latestSequences.splice(si, 1); markDirty(); send({ action: "set_sequences", sequences: latestSequences }); renderSequences(); });
+    card.querySelector(".sequence-add-step")?.addEventListener("click", () => {
+      const source = sources[0] || { tag: "", point: "" }, dest = destinations[0] || { tag: "", point: "" };
+      syncFields();
+      seq.steps.push({ name: `Step ${seq.steps.length + 1}`, actions: [{ destination: { object_tag: dest.tag, io_point: dest.point }, value: true }], transition: { object_tag: source.tag, io_point: source.point, operator: "truthy", value: "" }, timeout_ms: 0, on_timeout: "fault" });
+      markDirty(); send({ action: "set_sequences", sequences: latestSequences }); renderSequences();
+    });
+    card.querySelectorAll(".step-delete").forEach(btn => btn.addEventListener("click", () => {
+      const pi = Number(btn.closest(".sequence-step").dataset.step);
+      syncFields();
+      if (seq.steps.length > 1) seq.steps.splice(pi, 1);
+      markDirty(); send({ action: "set_sequences", sequences: latestSequences }); renderSequences();
+    }));
+  });
+}
+
+function renderSequenceStatus() {
+  const list = document.getElementById("sequence-status-list");
+  if (!list) return;
+  list.innerHTML = latestSequenceStatus.map(s => `<div class="sequence-status ${s.status}"><b>${s.name}</b><span>${s.status.toUpperCase()}</span><span>${s.step || "—"}</span>${s.fault ? `<em>${s.fault}</em>` : ""}</div>`).join("");
+  highlightActiveSteps();
+}
+
+// Turns on the STEP badge for whichever step is currently executing, using
+// the state index reported per sequence id in latestSequenceStatus. Only
+// toggles classes on the already-rendered cards so it never disturbs
+// in-progress edits (no re-render / no lost input focus).
+function highlightActiveSteps() {
+  const list = document.getElementById("sequence-list");
+  if (!list) return;
+  const statusById = new Map(latestSequenceStatus.map(s => [String(s.id), s]));
+  list.querySelectorAll(".sequence-card").forEach(card => {
+    const s = statusById.get(card.dataset.seqId);
+    const activeIndex = s && s.state >= 0 ? s.state : -1;
+    const isFault = s && s.status === "fault";
+    card.querySelectorAll(".sequence-step").forEach(stepEl => {
+      const pi = Number(stepEl.dataset.step);
+      const isActive = pi === activeIndex;
+      stepEl.classList.toggle("active-step", isActive);
+      stepEl.classList.toggle("fault-step", isActive && isFault);
+    });
+  });
+}
+
+document.getElementById("sequence-add-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  const source = readableIoPoints()[0], dest = writableIoPoints()[0];
+  if (!source || !dest) { alert("Create at least one readable and one writable I/O point first."); return; }
+  latestSequences.push({ id: `sequence_${Date.now()}`, name: `Sequence ${latestSequences.length + 1}`, enabled: true, auto_start: true, cycle: "once", steps: [{ name: "Step 1", actions: [{ destination: { object_tag: dest.tag, io_point: dest.point }, value: true }], transition: { object_tag: source.tag, io_point: source.point, operator: "truthy", value: "" }, timeout_ms: 0, on_timeout: "fault" }] });
+  markDirty(); send({ action: "set_sequences", sequences: latestSequences }); renderSequences();
+});
+document.getElementById("sequence-validate-btn")?.addEventListener("click", () => send({ action: "validate_sequences" }));
+document.getElementById("sequence-reset-btn")?.addEventListener("click", () => send({ action: "sequence_command", command: "reset" }));
 
 function sendSetPoint(tagName, point, value) {
   send({ action: "set_point", tag_name: tagName, point, value });

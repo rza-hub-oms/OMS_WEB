@@ -15,7 +15,7 @@ from core.scene import Scene
 class Project:
     scene: Scene = field(default_factory=Scene)
     name: str = "Untitled"
-    version: int = 2
+    version: int = 5
     metadata: dict = field(default_factory=dict)
 
     def reset(self) -> None:

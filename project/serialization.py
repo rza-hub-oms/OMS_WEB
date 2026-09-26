@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.scene import COMPONENT_REGISTRY
 
-PROJECT_VERSION = 2
+PROJECT_VERSION = 5
 
 _SETTER_OVERRIDES = {
     "rotation": "rotation_value",
@@ -21,10 +21,10 @@ def migrate_project_dict(data: dict) -> dict:
     """Upgrade older project dictionaries in memory without mutating input."""
     payload = dict(data or {})
     version = int(payload.get("version", 1) or 1)
-    if version < 2:
+    if version < PROJECT_VERSION:
         payload.setdefault("metadata", {})
         payload["metadata"].setdefault("migrated_from", version)
-        payload["version"] = 2
+        payload["version"] = PROJECT_VERSION
     return payload
 
 
@@ -63,6 +63,8 @@ def scene_to_project_dict(scene, *, name="Untitled", metadata=None) -> dict:
         "plc_mapping": list(scene.plc_mapping),
         "plc_connection": dict(scene.plc_connection),
         "type_counters": dict(scene._type_counters),
+        "logic_rules": list(scene.logic_rules),
+        "sequences": list(scene.sequences),
     }
 
 
@@ -74,6 +76,9 @@ def load_project_dict(scene, data: dict) -> dict:
     scene.plc_mapping = list(payload.get("plc_mapping", []))
     scene.plc_connection = dict(payload.get("plc_connection", {}))
     scene._type_counters = dict(payload.get("type_counters", {}))
+    scene.logic_rules = list(payload.get("logic_rules", []))
+    scene.sequences = list(payload.get("sequences", []))
+    scene.sequence_engine.reset()
     scene.objects.update(_build_objects(payload.get("objects", [])))
     return {
         "name": payload.get("name", "Untitled"),

@@ -541,6 +541,183 @@ button:hover { background: #25445c; border-color: #3488c7; }
 .mapping-card:last-child { border-bottom: 0; }
 .mapping-card.unmapped-row { background: #3a3320; }
 
+.mapping-card.logic-rule {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 34px 14px 12px;
+  margin: 8px;
+  border: 1px solid #223141;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #121d28, #0f1922);
+}
+
+.logic-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logic-rule-num {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: #5f7488;
+  background: #182531;
+  border: 1px solid #26384a;
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+
+.logic-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.logic-rule-tag {
+  flex: 0 0 auto;
+  width: 66px;
+  box-sizing: border-box;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  color: #4aa3f0;
+  background: #10253a;
+  border: 1px solid #1c3c58;
+  border-radius: 4px;
+  padding: 3px 4px;
+}
+.logic-rule-tag-then { color: #3cce80; background: #0f2a1e; border-color: #1d4a34; }
+
+.logic-rule label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.logic-rule select,
+.logic-rule input[type="text"] {
+  min-width: 90px;
+  height: 28px;
+  padding: 5px 7px;
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #2c3e4f;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.logic-rule select:focus,
+.logic-rule input[type="text"]:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.logic-rule .logic-value { min-width: 70px; flex: 0 1 100px; }
+
+.logic-rule-values {
+  display: flex;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px dashed #202f3c;
+}
+
+.logic-value-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.logic-value-chip input {
+  width: 64px;
+  height: 24px;
+  padding: 3px 6px;
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.logic-value-on { color: #3cce80; }
+.logic-value-off { color: #f35361; }
+
+.logic-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 34px;
+  height: 18px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.logic-toggle input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.logic-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #253546;
+  border-radius: 999px;
+  transition: background .15s ease;
+  pointer-events: none;
+}
+.logic-toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: #8ca0b2;
+  border-radius: 50%;
+  transition: transform .15s ease, background .15s ease;
+}
+.logic-toggle input:checked + .logic-toggle-slider { background: #1a5c39; }
+.logic-toggle input:checked + .logic-toggle-slider::before { transform: translateX(16px); background: #3cce80; }
+.logic-toggle-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  color: #6f8394;
+}
+
+.logic-rule-head {
+  justify-content: center;
+}
+
+.logic-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #4a2323;
+  background: #2a1414;
+  color: #ff9e9e;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.logic-delete:hover { background: #3a1717; }
+
 .mapping-card-top {
   min-width: 0;
   display: flex;
@@ -1141,10 +1318,16 @@ button:hover { background: #25445c; border-color: #3488c7; }
   overflow-wrap: break-word;
 }
 
-.checkbox-field {
-  display: flex;
+#property-form label.checkbox-field {
+  display: grid;
+  grid-template-columns: 1fr 32px;
   align-items: center;
   gap: 6px;
+  margin: 12px 14px 0;
+}
+
+#property-form label.checkbox-field input[type="checkbox"] {
+  justify-self: center;
 }
 
 .delete {
@@ -2065,3 +2248,148 @@ select:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+
+.mapping-card.sequence-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  margin: 8px;
+  border: 1px solid #223141;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #121d28, #0f1922);
+}
+
+.sequence-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-right: 36px; }
+.sequence-head input.sequence-name {
+  flex: 1;
+  min-width: 120px;
+  height: 28px;
+  font-weight: 600;
+  color: #dce5ef;
+}
+.sequence-head label { display: flex; align-items: center; gap: 4px; color: #8497a8; font-size: 10px; white-space: nowrap; }
+.sequence-head select,
+.sequence-head input.sequence-name,
+.sequence-row input,
+.sequence-row select {
+  background: #0e1720;
+  color: #e4edf5;
+  border: 1px solid #2c3e4f;
+  border-radius: 4px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 10px;
+}
+.sequence-head select:focus, .sequence-head input:focus,
+.sequence-row select:focus, .sequence-row input:focus { outline: none; border-color: var(--blue); }
+
+.sequence-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #4a2323;
+  background: #2a1414;
+  color: #ff9e9e;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.sequence-delete:hover { background: #3a1717; }
+
+.sequence-steps { display: flex; flex-direction: column; gap: 10px; }
+
+.sequence-step {
+  position: relative;
+  border: 1px solid #1e2c3a;
+  border-radius: 6px;
+  background: #0d151d;
+  padding: 24px 10px 10px;
+}
+.sequence-step-title {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 8px;
+  color: #8ea2b4;
+  font-size: 10px;
+}
+.sequence-step-title b {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  color: #5f7488;
+  background: #182531;
+  border: 1px solid #26384a;
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+.sequence-step-title .step-name { flex: 1; height: 24px; }
+.step-delete {
+  background: transparent;
+  border: 0;
+  color: #8a6d73;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.sequence-step.active-step {
+  border-color: #1d4a8a;
+  background: #0e1c2c;
+  box-shadow: 0 0 0 1px #2a5ba8 inset;
+}
+.sequence-step.active-step .sequence-step-title b {
+  color: #eaf4ff;
+  background: #1d5cc9;
+  border-color: #2a6be0;
+}
+.sequence-step.fault-step {
+  border-color: #4a2323;
+  background: #1a0e0e;
+  box-shadow: 0 0 0 1px #a83a3a inset;
+}
+.sequence-step.fault-step .sequence-step-title b {
+  color: #ffe4e4;
+  background: #c92d2d;
+  border-color: #e04040;
+}
+
+.sequence-row { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+.sequence-row span {
+  flex: 0 0 auto;
+  width: 80px;
+  box-sizing: border-box;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  color: #4aa3f0;
+  background: #10253a;
+  border: 1px solid #1c3c58;
+  border-radius: 4px;
+  padding: 5px 4px;
+}
+.sequence-row:nth-of-type(3) span { color: #3cce80; background: #0f2a1e; border-color: #1d4a34; }
+.sequence-row .sequence-select { flex: 1; min-width: 0; height: 28px; }
+.sequence-row .step-value { width: 65px; height: 28px; }
+.sequence-row .step-condition-value { width: 70px; height: 28px; }
+.sequence-row .step-timeout { width: 75px; height: 28px; }
+.sequence-row .step-op, .sequence-row .step-timeout-mode { height: 28px; }
+.sequence-add-step { margin-top: 2px; align-self: flex-start; }
+.sequence-status { display: grid; grid-template-columns: 1.4fr .8fr 1fr; gap: 8px; padding: 7px 10px; border-top: 1px solid #263746; font-size: 10px; color: #a5b5c2; }
+.sequence-status.running span:nth-child(2) { color: #78c99b; }
+.sequence-status.fault span:nth-child(2), .sequence-status.fault em { color: #e47f7f; }
+.sequence-status.complete span:nth-child(2) { color: #76a9df; }
+.sequence-status em { grid-column: 1 / -1; font-style: normal; }

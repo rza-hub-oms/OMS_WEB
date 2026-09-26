@@ -116,7 +116,7 @@ class MotorBehavior(SimObject):
     # ------------------------------------------------------------------
 
     def advance_animation(self, dt_ms):
-        if not self.running:
+        if not self.running or self.is_safety_blocked():
             return
 
         dt_sec = float(dt_ms) / 1000.0
@@ -138,6 +138,9 @@ class MotorBehavior(SimObject):
 
     def get_io_signals(self):
         return [
+            Signal("mode", self.get_mode, self.set_mode, str, "Manual/Auto mode"),
+            Signal("fault", self.get_fault, self.set_fault, bool, "Machine fault"),
+            Signal("emergency_stop", self.get_emergency_stop, self.set_emergency_stop, bool, "Emergency stop"),
             Signal("speed", self.get_speed, self.set_speed, float, "Motor speed"),
             Signal("running", self.get_running, self.set_running, bool, "Run command"),
             Signal("running_status", self.get_running_status, None, int, "Motor running status"),
@@ -150,7 +153,10 @@ class MotorBehavior(SimObject):
             "running": (self.get_running, self.set_running),
             "running_status": (self.get_running_status, None),
             "direction": (self.get_direction, self.set_direction),
-        }
+                    "mode": (self.get_mode, self.set_mode),
+            "fault": (self.get_fault, self.set_fault),
+            "emergency_stop": (self.get_emergency_stop, self.set_emergency_stop),
+}
 
     # ------------------------------------------------------------------
     # Serialization

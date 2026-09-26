@@ -1,5 +1,22 @@
 # OMS Web – Architecture Update
 
+## 2.1 — Simulation logic / sequence control
+
+- Added rising-edge and falling-edge logic conditions.
+- Added deterministic on-delay timers (`delay_ms`) for level conditions.
+- Added configurable true/false destination values to logic rules.
+- Logic runtime state resets safely when the scene/rule set is reset.
+- Project format advanced to version 3; older projects migrate in memory.
+
+
+## Next simulation step — cylinder physical I/O targets
+
+- Cylinders can now physically actuate Sensors and Push buttons, in addition to conveyor interactions.
+- Sensor/push-button targets are momentary: they release automatically when the cylinder retracts or loses contact.
+- The Design inspector exposes conveyor, sensor, and push-button targets for cylinder interactions.
+- Added regression tests for both physical target types.
+
+
 ## 2.0 foundation update
 
 - Fixed conveyor visual direction by removing the independent CSS belt animation and rendering belt phase from the server simulation state.
@@ -21,3 +38,11 @@
 - Fixed simulation-mode conveyor clicks so each click toggles the **current** running state; the first click starts and the next click stops.
 - Fixed conveyor belt visual phase direction so the belt markings move in the same direction as the simulated boxes.
 - Bumped web asset cache version from `v=7` to `v=8`.
+
+
+## v4 — Sequence Control
+- Added deterministic step/transition sequence engine for Simulation mode.
+- Added step actions, edge/level transitions, timeouts, fault/stop/advance handling, and continuous cycles.
+- Added Sequence editor and live sequence status panel.
+- Added `.oms` v3 → v4 migration and sequence persistence.
+- Runtime remains PLC-controlled and does not execute simulation sequences.

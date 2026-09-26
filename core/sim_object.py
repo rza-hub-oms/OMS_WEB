@@ -16,6 +16,13 @@ class SimObject:
         self.height = height
         self.layer = 0
 
+        # Common machine-object operational state.  These fields are
+        # deliberately kept in the model layer so Simulation, PLC mapping,
+        # alarms and Runtime can consume the same state later.
+        self.mode = "auto"
+        self.fault = False
+        self.emergency_stop = False
+
     # Position -- shared by every component type, used by the
     # Properties panel's X/Y fields.
     def set_x(self, value: float) -> None:
@@ -39,6 +46,28 @@ class SimObject:
     def get_layer(self) -> int:
         return self.layer
 
+    def set_mode(self, value) -> None:
+        value = str(value).lower()
+        self.mode = value if value in ("auto", "manual") else "auto"
+
+    def get_mode(self) -> str:
+        return self.mode
+
+    def set_fault(self, value) -> None:
+        self.fault = bool(int(value)) if not isinstance(value, bool) else value
+
+    def get_fault(self) -> bool:
+        return self.fault
+
+    def set_emergency_stop(self, value) -> None:
+        self.emergency_stop = bool(int(value)) if not isinstance(value, bool) else value
+
+    def get_emergency_stop(self) -> bool:
+        return self.emergency_stop
+
+    def is_safety_blocked(self) -> bool:
+        return bool(self.fault or self.emergency_stop)
+
     def advance_animation(self, dt_ms: float) -> None:
         raise NotImplementedError
 
@@ -56,7 +85,7 @@ class SimObject:
 
     def to_dict(self) -> dict:
         """Serialize current state for the web frontend."""
-        state = {"tag_name": self.tag_name, "layer": self.layer}
+        state = {"tag_name": self.tag_name, "layer": self.layer, "mode": self.mode, "fault": self.fault, "emergency_stop": self.emergency_stop}
         io_points = self.get_plc_io_points()
         for point_name, (getter, _setter) in io_points.items():
             state[point_name] = getter()

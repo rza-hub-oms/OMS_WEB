@@ -185,6 +185,9 @@ async def websocket_endpoint(ws: WebSocket):
                     if requested_mode == "design":
                         session.scene.stop_all_actuators()
 
+                    if requested_mode == "simulation" and session.mode != "simulation":
+                        session.scene.logic_engine.reset()
+                        session.scene.sequence_engine.reset()
                     session.mode = requested_mode
                     continue
                 elif action == "set_point":
@@ -307,6 +310,36 @@ async def websocket_endpoint(ws: WebSocket):
                         }))
                 elif action == "plc_browse_opcua":
                     await _plc_browse_opcua(session, ws, command.get("node_id"))
+                elif action == "set_logic_rules":
+                    # Simulation-only automation. Keep Runtime controlled by the live PLC.
+                    if session.mode != "design":
+                        continue
+                    session.scene.logic_rules = list(command.get("rules", []))
+                    session.scene.logic_engine.reset()
+                elif action == "set_sequences":
+                    if session.mode != "design":
+                        continue
+                    session.scene.sequences = list(command.get("sequences", []))
+                    session.scene.sequence_engine.reset()
+                elif action == "validate_sequences":
+                    await ws.send_text(json.dumps({
+                        "sequence_validation": session.scene.validate_sequences(),
+                    }))
+                elif action == "sequence_command":
+                    if session.mode != "simulation":
+                        continue
+                    command_name = command.get("command")
+                    if command_name == "reset":
+                        session.scene.sequence_engine.reset()
+                    elif command_name == "stop":
+                        session.scene.sequence_engine.stop(command.get("sequence_id"))
+                    elif command_name == "start":
+                        session.scene.sequence_engine.start(command.get("sequence_id"))
+
+                elif action == "validate_logic":
+                    await ws.send_text(json.dumps({
+                        "logic_validation": session.scene.validate_logic_rules(),
+                    }))
                 elif action == "load_project":
                     if session.mode != "design":
                         continue
@@ -485,7 +518,11 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
         dt_seconds = now - last
         last = now
         try:
-            session.scene.tick(dt_seconds, simulate=(session.mode != "design"))
+            session.scene.tick(
+            dt_seconds,
+            simulate=(session.mode != "design"),
+            logic_enabled=(session.mode == "simulation"),
+        )
             if session.plc_sync is not None and session.mode == "runtime":
                 session.plc_sync.poll()
             await manager.broadcast(
@@ -494,6 +531,9 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
                     "objects": session.scene.to_dict(),
                     "plc": _plc_status(session),
                     "mode": session.mode,
+                    "logic_rules": session.scene.logic_rules,
+                    "sequences": session.scene.sequences,
+                    "sequence_status": session.scene.sequence_engine.current_status(session.scene.sequences),
                     "project": {
                         "name": session.project.name,
                         "version": session.project.version,

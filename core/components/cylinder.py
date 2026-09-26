@@ -207,6 +207,8 @@ class CylinderBehavior(SimObject):
     # ------------------------------------------------------------------
 
     def is_moving(self) -> bool:
+        if self.is_safety_blocked():
+            return False
         if self.valve_type == self.VALVE_DUAL:
             moving_toward_extend = (
                 self.extend_command
@@ -308,6 +310,9 @@ class CylinderBehavior(SimObject):
             }
 
         return {
+            "mode": (self.get_mode, self.set_mode),
+            "fault": (self.get_fault, self.set_fault),
+            "emergency_stop": (self.get_emergency_stop, self.set_emergency_stop),
             "extend": (
                 self.get_extended,
                 self.set_extended,

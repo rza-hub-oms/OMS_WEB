@@ -21,6 +21,10 @@ FastAPI session manager
 
 Each browser connection gets an independent project/session. A project can be saved as `.oms` JSON and is versioned so older projects can be migrated.
 
+## Physical component relations
+
+Cylinders can be configured to interact with conveyors, sensors, and push buttons. Sensor and push-button interactions are physical/momentary: the target is actuated while the cylinder is fully extended and the rod tip overlaps it, then released when the cylinder retracts.
+
 ## Modes
 
 - **Design** — edit the machine; simulation is frozen.
@@ -66,7 +70,7 @@ The tests cover conveyor reverse motion, elapsed-time simulation, typed signals,
 
 ## Project files
 
-`.oms` files are JSON documents. Current project format version is **2**. Version 1 files are migrated in memory when opened.
+`.oms` files are JSON documents. Current project format version is **3**. Older project files are migrated in memory when opened.
 
 ## Frontend structure
 
@@ -75,3 +79,8 @@ The tests cover conveyor reverse motion, elapsed-time simulation, typed signals,
 ## Logging
 
 Use Python's standard logging system rather than ad-hoc `print()` calls. PLC diagnostics are emitted under the `oms.plc` logger.
+
+
+## Sequence Control (v4)
+
+Simulation mode now includes a deterministic step/transition sequence engine. A sequence contains ordered steps with output actions, I/O-based transitions, optional timeouts, timeout behavior (`fault`, `stop`, or `advance`), and `once`/`continuous` cycle modes. Sequences are simulation-only and are never executed in Runtime mode; the live PLC remains the Runtime source of truth.

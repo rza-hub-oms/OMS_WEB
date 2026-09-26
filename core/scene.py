@@ -14,10 +14,13 @@ from core.components.cylinder import CylinderBehavior
 from core.components.motor import MotorBehavior
 from core.components.sensor import SensorBehavior
 from core.components.push_button import PushButtonBehavior
+from core.components.push_button import PushButtonBehavior
 from core.components.emergency_push_button import EmergencyPushButtonBehavior
 from core.components.toggle_switch import ToggleSwitchBehavior
 from core.components.tower_light import TowerLightBehavior
 from core.components.label import LabelBehavior
+from core.logic import LogicEngine
+from core.sequence import SequenceEngine
 
 # Maps a serialized "type" string to its behavior class. Extend this as
 # more components are ported (toggle_switch, tower_light, etc.).
@@ -70,6 +73,28 @@ def _push_box_off_conveyor(cylinder: "CylinderBehavior", target: "ConveyorBehavi
     target.box_positions = kept
 
 
+def _tip_overlaps_target(cylinder: "CylinderBehavior", target) -> bool:
+    """Return True when the cylinder's rod tip overlaps a target rectangle."""
+    tip_x, tip_y = cylinder.get_rod_tip_position()
+    radius = max(4.0, min(12.0, min(target.width, target.height) * 0.15))
+    return (
+        tip_x + radius >= target.x
+        and tip_x - radius <= target.x + target.width
+        and tip_y + radius >= target.y
+        and tip_y - radius <= target.y + target.height
+    )
+
+
+def _press_sensor(cylinder: "CylinderBehavior", target: SensorBehavior) -> None:
+    """Actuate a sensor while the cylinder rod tip is physically over it."""
+    target.set_detected(_tip_overlaps_target(cylinder, target))
+
+
+def _press_push_button(cylinder: "CylinderBehavior", target: PushButtonBehavior) -> None:
+    """Press a push button while the cylinder rod tip is physically over it."""
+    target.set_pressed(_tip_overlaps_target(cylinder, target))
+
+
 # Maps a target component's class to the function that defines what a
 # fully-extended cylinder does to it. To give the cylinder a new kind
 # of physical relation (e.g. pressing a sensor or a push button), write
@@ -80,6 +105,8 @@ def _push_box_off_conveyor(cylinder: "CylinderBehavior", target: "ConveyorBehavi
 # class up in this dict.
 CYLINDER_RELATION_HANDLERS = {
     ConveyorBehavior: _push_box_off_conveyor,
+    SensorBehavior: _press_sensor,
+    PushButtonBehavior: _press_push_button,
 }
 
 
@@ -102,7 +129,13 @@ class Scene:
         # connection settings (not the live connection itself).
         self.plc_connection = {}
 
-        self._cylinder_previously_extended = {}  
+        self._cylinder_previously_extended = {}
+        # Simulation-only control rules. Runtime never executes these; live PLC
+        # commands remain the source of truth there.
+        self.logic_rules = []
+        self.logic_engine = LogicEngine(self)
+        self.sequences = []
+        self.sequence_engine = SequenceEngine(self)
 
     def add(self, obj) -> None:
         """Add a component to the scene, keyed by its tag_name."""
@@ -191,8 +224,12 @@ class Scene:
         self._type_counters.clear()
         self._cylinder_previously_extended.clear()
         self.plc_mapping.clear()
+        self.logic_rules.clear()
+        self.logic_engine.reset()
+        self.sequences.clear()
+        self.sequence_engine.reset()
 
-    def tick(self, dt_seconds: float = TICK_MS / 1000.0, simulate: bool = True) -> None:
+    def tick(self, dt_seconds: float = TICK_MS / 1000.0, simulate: bool = True, logic_enabled: bool = False) -> None:
         """Advance every component by one simulation step, then update
         sensor detection against the now-current box positions.
 
@@ -237,6 +274,9 @@ class Scene:
 
         self._update_sensors()
         self._handle_cylinder_relations()
+        if logic_enabled:
+            self.logic_engine.apply(self.logic_rules, dt_ms)
+            self.sequence_engine.apply(self.sequences, dt_ms)
 
     def _handle_cylinder_relations(self) -> None:
         """Runs each fully-extended cylinder's physical relation (see
@@ -255,11 +295,34 @@ class Scene:
             else:
                 extending = obj.extended
 
-            if not extending or not obj.target_tag or obj.progress < 1.0:
+            if not obj.target_tag:
                 continue
 
             target = self.objects.get(obj.target_tag)
             if target is None:
+                continue
+
+            # Physical momentary targets must be released as soon as the
+            # cylinder is no longer fully extended over them. Conveyor
+            # interaction is intentionally one-shot/position based and
+            # does not need a release operation.
+            if isinstance(target, SensorBehavior):
+                target.set_detected(
+                    extending
+                    and obj.progress >= 1.0
+                    and _tip_overlaps_target(obj, target)
+                )
+                continue
+
+            if isinstance(target, PushButtonBehavior):
+                target.set_pressed(
+                    extending
+                    and obj.progress >= 1.0
+                    and _tip_overlaps_target(obj, target)
+                )
+                continue
+
+            if not extending or obj.progress < 1.0:
                 continue
 
             handler = CYLINDER_RELATION_HANDLERS.get(type(target))
@@ -343,6 +406,48 @@ class Scene:
         """Serialize every component's current state, keyed by tag_name.
         This is what gets pushed to the browser over WebSocket each tick."""
         return {name: obj.to_dict() for name, obj in self.objects.items()}
+
+    def validate_logic_rules(self):
+        """Return validation errors for configured simulation rules."""
+        errors = []
+        for index, rule in enumerate(self.logic_rules):
+            source = rule.get("source") or {}
+            destination = rule.get("destination") or {}
+            src_obj = self.objects.get(source.get("object_tag"))
+            dst_obj = self.objects.get(destination.get("object_tag"))
+            if src_obj is None or source.get("io_point") not in src_obj.get_plc_io_points():
+                errors.append({"index": index, "error": "Source I/O point does not exist."})
+                continue
+            if dst_obj is None:
+                errors.append({"index": index, "error": "Destination component does not exist."})
+                continue
+            point = dst_obj.get_plc_io_points().get(destination.get("io_point"))
+            if point is None or point[1] is None:
+                errors.append({"index": index, "error": "Destination I/O point is not writable."})
+            if rule.get("operator", "truthy") not in LogicEngine.OPERATORS:
+                errors.append({"index": index, "error": "Unsupported condition operator."})
+        return errors
+
+    def validate_sequences(self):
+        errors = []
+        for index, sequence in enumerate(self.sequences):
+            steps = sequence.get("steps") or []
+            if not steps:
+                errors.append({"index": index, "error": "Sequence has no steps."})
+                continue
+            for step_index, step in enumerate(steps):
+                transition = step.get("transition")
+                if transition:
+                    obj = self.objects.get(transition.get("object_tag"))
+                    if obj is None or transition.get("io_point") not in obj.get_plc_io_points():
+                        errors.append({"index": index, "step": step_index, "error": "Transition I/O point does not exist."})
+                for action in step.get("actions") or []:
+                    destination = action.get("destination") or {}
+                    obj = self.objects.get(destination.get("object_tag"))
+                    point = obj.get_plc_io_points().get(destination.get("io_point")) if obj else None
+                    if point is None or point[1] is None:
+                        errors.append({"index": index, "step": step_index, "error": "Step action destination is not writable."})
+        return errors
 
     def signal_catalog(self) -> list:
         """Return the typed signal catalog used by the PLC mapping UI."""
