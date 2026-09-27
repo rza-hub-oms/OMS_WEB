@@ -253,6 +253,7 @@ let latestState = {};
 let latestLogicRules = [];
 let latestSequences = [];
 let latestSequenceStatus = [];
+let latestAlarms = { definitions: [], active: [], history: [], active_count: 0 };
 // Cache of created DOM elements per tag_name, so we update in place
 // instead of rebuilding the DOM every 50ms (which would restart CSS
 // transitions/animations and cause flicker).
@@ -660,6 +661,10 @@ setMessageHandler((event) => {
     latestSequenceStatus = msg.sequence_status;
     renderSequenceStatus();
   }
+  if (msg.alarms && JSON.stringify(msg.alarms) !== JSON.stringify(latestAlarms)) {
+    latestAlarms = msg.alarms;
+    renderAlarms();
+  }
   render(latestState);
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
@@ -672,7 +677,7 @@ function renderTags() {
   if (!list) return;
   list.innerHTML = latestTags.map(tag => {
     const value = typeof tag.value === "boolean" ? (tag.value ? "TRUE" : "FALSE") : (tag.value ?? "—");
-    const source = tag.object_tag && tag.io_point ? `${tag.object_tag}.${tag.io_point}` : (tag.system ? "" : "Internal");
+    const source = tag.system ? `${tag.object_tag}.${tag.io_point}` : "Internal";
     return `<div class="mapping-card tag-card">
       <div><b>${tag.name}</b><small>${source}</small></div>
       <span>${tag.datatype}</span>
@@ -719,21 +724,6 @@ function renderTagComponentPicker(filterText) {
   tagComponentList.innerHTML = "";
   tagComponentEmpty.classList.toggle("hidden", rows.length > 0);
   tagComponentEmpty.textContent = rows.length ? "" : "No component I/O points match that search.";
-
-  const current = latestTags.find(t => t.name === tagComponentTarget);
-  if (current?.object_tag && !needle) {
-    const disconnectRow = document.createElement("div");
-    disconnectRow.className = "tag-picker-row tag-picker-disconnect";
-    disconnectRow.innerHTML = `<span class="tag-picker-name">✕ Disconnect</span>
-      <span class="tag-picker-type">Currently: ${escapeHtml(current.object_tag)}.${escapeHtml(current.io_point)}</span>
-      <span class="tag-picker-address">Use internal value / expression instead</span>`;
-    disconnectRow.addEventListener("click", () => {
-      send({ action: "unbind_tag", name: tagComponentTarget });
-      tagComponentModal.classList.add("hidden");
-    });
-    tagComponentList.appendChild(disconnectRow);
-  }
-
   for (const tag of rows) {
     const row = document.createElement("div");
     row.className = "tag-picker-row";
@@ -970,7 +960,7 @@ function writableIoPoints() {
   for (const [tag, obj] of Object.entries(latestState)) {
     const points = obj._io_points || {};
     for (const [point, writable] of Object.entries(points)) {
-      if (writable) rows.push({ tag, point, label: `${tag} → ${point}`, value: `${tag}|${point}` });
+      if (writable) rows.push({ tag, point, label: `${tag} → ${point}` });
     }
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label));
@@ -980,25 +970,13 @@ function readableIoPoints() {
   const rows = [];
   for (const [tag, obj] of Object.entries(latestState)) {
     const points = obj._io_points || {};
-    for (const point of Object.keys(points)) rows.push({ tag, point, label: `${tag} → ${point}`, value: `${tag}|${point}` });
-  }
-  // Internal/derived tags (unconnected custom tags, incl. ones driven by
-  // an fx expression) can also feed a rule's IF condition, so a computed
-  // multi-tag expression can end up driving a real actuator.
-  for (const t of latestTags) {
-    if (!t.system) rows.push({ tag: t.name, point: null, label: `🏷 ${t.name}`, value: `T:${t.name}` });
+    for (const point of Object.keys(points)) rows.push({ tag, point, label: `${tag} → ${point}` });
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function logicPairFromValue(value) {
-  if (value.startsWith("T:")) return { tag_name: value.slice(2) };
-  const [tag, point] = value.split("|");
-  return { object_tag: tag, io_point: point };
-}
-
 function logicSelect(options, selected) {
-  return `<select>${options.map(o => `<option value="${o.value}" ${o.value === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
+  return `<select>${options.map(o => `<option value="${o.tag}|${o.point}" ${`${o.tag}|${o.point}` === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
 }
 
 function renderLogicRules() {
@@ -1007,7 +985,7 @@ function renderLogicRules() {
   const sources = readableIoPoints();
   const destinations = writableIoPoints();
   list.innerHTML = latestLogicRules.map((rule, i) => {
-    const src = rule.source?.tag_name ? `T:${rule.source.tag_name}` : `${rule.source?.object_tag || ""}|${rule.source?.io_point || ""}`;
+    const src = `${rule.source?.object_tag || ""}|${rule.source?.io_point || ""}`;
     const dst = `${rule.destination?.object_tag || ""}|${rule.destination?.io_point || ""}`;
     const enabled = rule.enabled !== false;
     return `<div class="mapping-card logic-rule" data-index="${i}">
@@ -1046,10 +1024,11 @@ function renderLogicRules() {
     const i = Number(card.dataset.index);
     const rule = latestLogicRules[i];
     const selects = card.querySelectorAll("select");
+    const readPair = value => { const [tag, point] = value.split("|"); return { object_tag: tag, io_point: point }; };
     const changed = () => {
       const [sourceSel, opSel, destSel] = [selects[0], selects[1], selects[2]];
       // opSel is actually the second select; source/destination are 0/2.
-      rule.source = logicPairFromValue(sourceSel.value); rule.operator = opSel.value; rule.destination = logicPairFromValue(destSel.value);
+      rule.source = readPair(sourceSel.value); rule.operator = opSel.value; rule.destination = readPair(destSel.value);
       rule.value = card.querySelector(".logic-value").value;
       rule.delay_ms = Number(card.querySelector(".logic-delay-ms").value || 0);
       rule.true_value = card.querySelector(".logic-true-value").value;
@@ -1070,7 +1049,7 @@ document.getElementById("logic-add-btn")?.addEventListener("click", () => {
   if (!isDesignMode()) return;
   const sources = readableIoPoints(), destinations = writableIoPoints();
   if (!sources.length || !destinations.length) { alert("Create at least one readable and one writable I/O point first."); return; }
-  latestLogicRules.push({ enabled: true, operator: "truthy", source: logicPairFromValue(sources[0].value), destination: logicPairFromValue(destinations[0].value), value: "", delay_ms: 0, true_value: true, false_value: false });
+  latestLogicRules.push({ enabled: true, operator: "truthy", source: { object_tag: sources[0].tag, io_point: sources[0].point }, destination: { object_tag: destinations[0].tag, io_point: destinations[0].point }, value: "", delay_ms: 0, true_value: true, false_value: false });
   markDirty(); send({ action: "set_logic_rules", rules: latestLogicRules }); renderLogicRules();
 });
 
@@ -1433,6 +1412,68 @@ function isComponentActive(obj) {
   return field ? !!obj[field] : null; // null -- this type has no status dot
 }
 
+function renderAlarms() {
+  const list = document.getElementById("alarm-list");
+  const history = document.getElementById("alarm-history");
+  const count = document.getElementById("alarm-active-count");
+  if (!list || !history) return;
+  const definitions = latestAlarms.definitions || [];
+  const activeById = new Map((latestAlarms.active || []).map(a => [a.id, a]));
+  count.textContent = String(latestAlarms.active_count || 0);
+
+  list.innerHTML = definitions.map((alarm, i) => {
+    const live = activeById.get(alarm.id);
+    return `<div class="mapping-card alarm-card ${live ? `alarm-${alarm.severity}` : ""}">
+      <div class="alarm-head">
+        <b>${alarm.name}</b>
+        <span class="alarm-severity">${alarm.severity.toUpperCase()}</span>
+        ${live ? `<span class="alarm-active">ACTIVE${live.acknowledged ? " · ACK" : ""}</span>` : `<span class="alarm-inactive">CLEAR</span>`}
+      </div>
+      <div class="alarm-fields">
+        <input class="alarm-name" value="${alarm.name || ""}" placeholder="Alarm name">
+        <select class="alarm-severity-select">
+          <option value="info" ${alarm.severity === "info" ? "selected" : ""}>Info</option>
+          <option value="warning" ${alarm.severity === "warning" ? "selected" : ""}>Warning</option>
+          <option value="critical" ${alarm.severity === "critical" ? "selected" : ""}>Critical</option>
+        </select>
+        <label><input class="alarm-enabled" type="checkbox" ${alarm.enabled !== false ? "checked" : ""}> Enabled</label>
+        <label><input class="alarm-latched" type="checkbox" ${alarm.latched ? "checked" : ""}> Latched</label>
+      </div>
+      <input class="alarm-expression" value='${(alarm.expression || "").replaceAll("'", "&#39;")}' placeholder='tag("Conveyor_1.fault") OR tag("EStop_1.pressed")'>
+      <div class="alarm-actions">
+        ${live ? `<button class="alarm-ack" type="button">Acknowledge</button>` : ""}
+        <button class="alarm-save" type="button">Apply</button>
+        <button class="alarm-delete" type="button">Delete</button>
+        ${alarm.last_error ? `<em>${alarm.last_error}</em>` : ""}
+      </div>
+    </div>`;
+  }).join("") || '<p class="empty">No alarms configured. Add one to monitor a tag condition.</p>';
+
+  list.querySelectorAll(".alarm-card").forEach((card, i) => {
+    const alarm = definitions[i];
+    card.querySelector(".alarm-save")?.addEventListener("click", () => {
+      alarm.name = card.querySelector(".alarm-name").value.trim() || alarm.id;
+      alarm.severity = card.querySelector(".alarm-severity-select").value;
+      alarm.enabled = card.querySelector(".alarm-enabled").checked;
+      alarm.latched = card.querySelector(".alarm-latched").checked;
+      alarm.expression = card.querySelector(".alarm-expression").value.trim();
+      markDirty(); send({ action: "set_alarms", alarms: definitions });
+    });
+    card.querySelector(".alarm-delete")?.addEventListener("click", () => {
+      latestAlarms.definitions = definitions.filter(a => a.id !== alarm.id);
+      markDirty(); send({ action: "set_alarms", alarms: latestAlarms.definitions });
+      renderAlarms();
+    });
+    card.querySelector(".alarm-ack")?.addEventListener("click", () => {
+      send({ action: "alarm_ack", alarm_id: alarm.id });
+    });
+  });
+
+  history.innerHTML = (latestAlarms.history || []).slice(0, 100).map(item =>
+    `<div class="alarm-history-row"><span>${new Date(item.timestamp).toLocaleTimeString()}</span><b>${item.name}</b><span>${item.severity}</span><span>${item.event}</span></div>`
+  ).join("") || '<p class="empty">No alarm events yet.</p>';
+}
+
 function renderComponentsList(state) {
   const list = document.getElementById("components-list");
   const tags = Object.keys(state);
@@ -1728,6 +1769,23 @@ canvasViewport.addEventListener("drop", (e) => {
     Math.round((e.clientY - rect.top - simulationPanY) / simulationZoom);
 
   sendAddComponent(componentType, x, y);
+});
+
+document.getElementById("alarm-add-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  const id = `alarm_${Date.now()}`;
+  latestAlarms.definitions = [...(latestAlarms.definitions || []), {
+    id, name: `Alarm ${latestAlarms.definitions.length + 1}`, severity: "warning",
+    expression: "", description: "", enabled: true, latched: false,
+  }];
+  markDirty();
+  send({ action: "set_alarms", alarms: latestAlarms.definitions });
+  renderAlarms();
+});
+
+document.getElementById("alarm-reset-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  send({ action: "alarm_reset" });
 });
 
 // ---------- Tabs (Properties / PLC Mapping) ----------

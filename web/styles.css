@@ -138,12 +138,14 @@ h1 { font-size: 16px; margin: 0 0 10px; }
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   border-bottom: 1px solid #263746;
   flex-shrink: 0;
 }
 
 .tabs .tab {
-  flex: 1;
+  flex: 1 1 25%;
+  min-width: 84px;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -151,6 +153,7 @@ h1 { font-size: 16px; margin: 0 0 10px; }
   padding: 9px 6px;
   color: #7c90a3;
   font-size: 11px;
+  line-height: 1.3;
   border-bottom: 2px solid transparent;
 }
 
@@ -2037,6 +2040,7 @@ select:focus-visible {
   border-bottom: 0;
   padding: 7px 4px;
   font-weight: 600;
+  text-align: center;
 }
 .tabs .tab:hover { background: #ffffff08; }
 .tabs .tab.active {
@@ -2427,3 +2431,27 @@ select:focus-visible {
   .tag-condition-row .tag-cond-value { grid-column:2; }
   .tag-condition-row .tag-cond-remove { grid-column:3; grid-row:2; }
 }
+
+/* Alarm engineering + runtime panel */
+.alarm-summary { margin: 6px 0 8px; padding: 8px 10px; background:#101b24; border:1px solid #263746; border-radius:5px; color:#9fb1be; }
+.alarm-summary b { color:#f0b36a; margin-right:4px; }
+.alarm-card { display:block; }
+.alarm-head { display:flex; gap:8px; align-items:center; margin-bottom:7px; }
+.alarm-head b { flex:1; }
+.alarm-severity, .alarm-active, .alarm-inactive { font-size:9px; font-weight:700; letter-spacing:.5px; }
+.alarm-severity { color:#aebdca; }
+.alarm-active { color:#ef7777; }
+.alarm-inactive { color:#6f8290; }
+.alarm-fields { display:grid; grid-template-columns:minmax(0, 1fr) 100px auto auto; gap:6px; align-items:center; margin-bottom:6px; }
+.alarm-fields input[type=text], .alarm-fields select { width:100%; box-sizing:border-box; height:28px; }
+.alarm-fields label { font-size:10px; color:#9eacb7; white-space:nowrap; }
+.alarm-expression { width:100%; box-sizing:border-box; height:30px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+.alarm-actions { display:flex; align-items:center; gap:6px; margin-top:6px; }
+.alarm-actions em { color:#e47f7f; font-size:9px; margin-left:auto; }
+.alarm-critical { border-left:3px solid #d84c4c; }
+.alarm-warning { border-left:3px solid #c78b39; }
+.alarm-info { border-left:3px solid #4a91c9; }
+.alarm-history-title { margin:14px 0 5px; font-size:10px; text-transform:uppercase; letter-spacing:.7px; color:#6f8290; }
+.alarm-history-row { display:grid; grid-template-columns:65px 1fr 60px 55px; gap:6px; padding:6px 8px; border-top:1px solid #263746; font-size:9px; color:#9eacb7; }
+.alarm-history-row b { color:#c8d4dc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width: 700px) { .alarm-fields { grid-template-columns:1fr 100px; } .alarm-fields label { grid-column:auto; } }

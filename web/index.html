@@ -127,6 +127,7 @@
         <button type="button" class="tab" data-tab="sequences">Sequences</button>
         <button type="button" class="tab" data-tab="monitor">PLC Monitor</button>
         <button type="button" class="tab" data-tab="tags">Tags</button>
+        <button type="button" class="tab" data-tab="alarms">Alarms</button>
         <button type="button" class="tab" data-tab="components">Components</button>
       </div>
 
@@ -212,6 +213,17 @@
         </div>
         <p class="hint">Central OMS tag system. Component I/O tags are generated automatically; internal tags can be used by alarms, trends and future Runtime functions.</p>
         <div id="tag-list" class="mapping-card-list"></div>
+      </div>
+      <div id="alarms-tab" class="tab-panel" data-panel="alarms">
+        <div class="mapping-actions">
+          <button id="alarm-add-btn" title="Add alarm">＋</button>
+          <button id="alarm-reset-btn" title="Clear alarm runtime/history">↺</button>
+        </div>
+        <p class="hint">Alarms use the central OMS tag system. Example expression: <code>tag("Conveyor_1.fault") OR tag("EStop_1.pressed")</code></p>
+        <div class="alarm-summary"><b id="alarm-active-count">0</b> active</div>
+        <div id="alarm-list" class="mapping-card-list"></div>
+        <div class="alarm-history-title">History</div>
+        <div id="alarm-history" class="mapping-card-list"></div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
           <ul id="components-list"></ul>

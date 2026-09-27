@@ -135,6 +135,10 @@ class TagRegistry:
             if tag.object_tag == old:
                 tag.object_tag = new
 
+    def evaluate_expression(self, expression: str):
+        """Evaluate one safe OMS tag expression for alarms and diagnostics."""
+        return _SafeExpression(self.read).evaluate(str(expression or "").strip())
+
     def evaluate_expressions(self) -> list[dict]:
         """Evaluate derived custom tags after component simulation.
 

@@ -384,6 +384,19 @@ async def websocket_endpoint(ws: WebSocket):
                     elif command_name == "start":
                         session.scene.sequence_engine.start(command.get("sequence_id"))
 
+                elif action == "set_alarms":
+                    if session.mode != "design":
+                        continue
+                    session.scene.alarm_engine.set_definitions(command.get("alarms", []))
+                elif action == "alarm_ack":
+                    if session.mode not in ("simulation", "runtime"):
+                        continue
+                    session.scene.alarm_engine.acknowledge(str(command.get("alarm_id", "")))
+                elif action == "alarm_reset":
+                    if session.mode != "design":
+                        continue
+                    session.scene.alarm_engine.reset(clear_history=True)
+
                 elif action == "validate_logic":
                     await ws.send_text(json.dumps({
                         "logic_validation": session.scene.validate_logic_rules(),
@@ -593,6 +606,7 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
                     "logic_rules": session.scene.logic_rules,
                     "sequences": session.scene.sequences,
                     "sequence_status": session.scene.sequence_engine.current_status(session.scene.sequences),
+                    "alarms": session.scene.alarm_snapshot(),
                     "project": {
                         "name": session.project.name,
                         "version": session.project.version,

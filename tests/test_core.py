@@ -11,6 +11,7 @@ from project.model import ProjectSession
 from project.serialization import scene_to_project_dict, load_project_dict, PROJECT_VERSION
 
 
+from core.components.emergency_push_button import EmergencyPushButtonBehavior
 class ConveyorTests(unittest.TestCase):
     def test_reverse_moves_boxes_and_belt_phase_in_same_direction(self):
         conveyor = ConveyorBehavior("Conveyor_1", width=300, height=70)
@@ -146,6 +147,44 @@ class ProjectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmergencyStopTagTests(unittest.TestCase):
+    def test_emergency_push_button_exposes_pressed_tag(self):
+        scene = Scene()
+        button = EmergencyPushButtonBehavior("EStop_1")
+        scene.add(button)
+        scene.tags.sync()
+
+        self.assertIn("EStop_1.pressed", scene.tags._system)
+        self.assertFalse(scene.tags.read("EStop_1.pressed"))
+
+        button.set_pressed(True)
+        scene.tags.sync()
+        self.assertTrue(scene.tags.read("EStop_1.pressed"))
+
+    def test_emergency_stop_alarm_uses_pressed_tag(self):
+        scene = Scene()
+        button = EmergencyPushButtonBehavior("EStop_1")
+        scene.add(button)
+        scene.alarm_engine.set_definitions([{
+            "id": "estop_alarm",
+            "name": "Emergency Stop",
+            "severity": "critical",
+            "expression": 'tag("EStop_1.pressed")',
+            "enabled": True,
+            "latched": True,
+        }])
+
+        scene.tags.sync()
+        self.assertEqual(scene.alarm_engine.evaluate(), [])
+
+        button.set_pressed(True)
+        scene.tags.sync()
+        active = scene.alarm_engine.evaluate()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["name"], "Emergency Stop")
+
 
 class LogicTests(unittest.TestCase):
     def test_sensor_drives_cylinder_in_simulation(self):
@@ -448,3 +487,48 @@ def test_bound_internal_tag_persists_in_project():
     assert tag.io_point == "running"
     assert restored.tags.write("MotorStart", True)
     assert restored.objects[motor.tag_name].running is True
+
+
+def test_alarm_engine_uses_tags_and_latched_acknowledgement():
+    from core.scene import Scene
+
+    scene = Scene()
+    scene.tags.add_custom("TestAlarm", "bool", True)
+    scene.alarm_engine.set_definitions([
+        {"id": "a1", "name": "Test alarm", "severity": "critical",
+         "expression": 'tag("TestAlarm")', "latched": True}
+    ])
+
+    scene.tick(0.05, simulate=True)
+    assert len(scene.alarm_engine.active()) == 1
+    assert scene.alarm_engine.history[0]["event"] == "active"
+
+    scene.tags.write("TestAlarm", False)
+    scene.tick(0.05, simulate=True)
+    assert len(scene.alarm_engine.active()) == 1  # latched until ACK
+
+    assert scene.alarm_engine.acknowledge("a1") is True
+    assert scene.alarm_engine.history[0]["event"] == "acknowledged"
+    scene.tick(0.05, simulate=True)
+    assert scene.alarm_engine.active() == []
+    assert scene.alarm_engine.history[0]["event"] == "cleared"
+    assert scene.alarm_engine.history[1]["event"] == "acknowledged"
+    assert scene.alarm_engine.history[2]["event"] == "active"
+
+
+def test_alarm_project_roundtrip():
+    from core.scene import Scene
+    from project.serialization import scene_to_project_dict, load_project_dict
+
+    scene = Scene()
+    scene.create_component("conveyor", 10, 20)
+    scene.alarm_engine.set_definitions([
+        {"id": "a1", "name": "Motor fault", "severity": "warning",
+         "expression": 'tag("Conveyor_1.fault")'}
+    ])
+    payload = scene_to_project_dict(scene, name="AlarmProject")
+
+    other = Scene()
+    info = load_project_dict(other, payload)
+    assert info["name"] == "AlarmProject"
+    assert other.alarm_engine.definitions[0]["expression"] == 'tag("Conveyor_1.fault")'

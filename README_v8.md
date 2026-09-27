@@ -17,3 +17,12 @@ Search dialog shows the parsed addresses and lets you select one.
 
 The same mapping can then be used by the PLC synchronization layer through
 the central tag registry.
+
+## v9 - Alarm System
+
+- Added a central alarm engine backed by OMS tags and the same safe expression evaluator used by internal tags.
+- Added warning/critical/info severities, enable/disable, latching and acknowledgement.
+- Added active alarm state and bounded alarm history.
+- Added alarm definitions to `.oms` project persistence.
+- Added Alarms inspector panel for configuration, acknowledgement and history.
+- Alarm evaluation continues during E-Stop so safety alarms are not skipped while the machine is stopped.

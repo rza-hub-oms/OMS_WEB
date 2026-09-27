@@ -68,8 +68,12 @@ class EmergencyPushButtonBehavior(SimObject):
     # ---------- PLC ----------
 
     def get_plc_io_points(self):
+        # The operator-facing state is exposed as a real OMS tag so alarms,
+        # logic and PLC mapping can reference e.g. ``EStop_1.pressed``.
+        # The signal is read-only from the PLC side: the operator presses
+        # the simulated E-stop and OMS publishes that state outward.
         return {
-            "emergency_signal": (self.get_not_pressed, None),
+            "pressed": (self.get_pressed, None),
         }
 
     # ---------- Serialization ----------
@@ -88,7 +92,6 @@ class EmergencyPushButtonBehavior(SimObject):
             "layer": self.layer,
 
             "pressed": self.pressed,
-            "emergency_signal": self.get_not_pressed(),
 
             "_io_points": {
                 point_name: setter is not None

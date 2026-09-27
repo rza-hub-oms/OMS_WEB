@@ -22,6 +22,7 @@ from core.components.label import LabelBehavior
 from core.logic import LogicEngine
 from core.sequence import SequenceEngine
 from core.tags import TagRegistry
+from core.alarms import AlarmEngine
 
 # Maps a serialized "type" string to its behavior class. Extend this as
 # more components are ported (toggle_switch, tower_light, etc.).
@@ -138,6 +139,7 @@ class Scene:
         self.sequences = []
         self.sequence_engine = SequenceEngine(self)
         self.tags = TagRegistry(self)
+        self.alarm_engine = AlarmEngine(self)
 
     def add(self, obj) -> None:
         """Add a component to the scene, keyed by its tag_name."""
@@ -228,6 +230,7 @@ class Scene:
         self.objects.clear()
         self.tags.custom.clear()
         self.tags.sync()
+        self.alarm_engine.reset(clear_history=True)
         self._type_counters.clear()
         self._cylinder_previously_extended.clear()
         self.plc_mapping.clear()
@@ -274,6 +277,10 @@ class Scene:
                     # CSS keeps animating client-side even though the
                     # backend is frozen.
                     obj.set_running(False)
+            # Safety alarms must still be evaluated while the machine is
+            # stopped; an E-Stop is itself a common alarm condition.
+            self.tags.evaluate_expressions()
+            self.alarm_engine.evaluate()
             return
 
         for obj in self.objects.values():
@@ -288,6 +295,7 @@ class Scene:
         # Derived internal tags are evaluated last so they see the final
         # component/logic state of this simulation tick.
         self.tags.evaluate_expressions()
+        self.alarm_engine.evaluate()
 
     def _handle_cylinder_relations(self) -> None:
         """Runs each fully-extended cylinder's physical relation (see
@@ -412,6 +420,10 @@ class Scene:
 
             # Unknown/non-detectable target type.
             obj.set_detected(False)
+
+    def alarm_snapshot(self) -> dict:
+        """Return current alarm definitions, active alarms and history."""
+        return self.alarm_engine.snapshot()
 
     def to_dict(self) -> dict:
         """Serialize every component's current state, keyed by tag_name.

@@ -1,5 +1,13 @@
 # OMS Web – Architecture Update
 
+## v9 — Alarm System
+
+- Added central tag-driven alarm engine with safe expressions, severity, latching and acknowledgement.
+- Added active alarm state and bounded event history.
+- Added Alarm inspector panel and alarm project persistence.
+- Alarm evaluation remains active during E-Stop.
+
+
 ## 2.1 — Simulation logic / sequence control
 
 - Added rising-edge and falling-edge logic conditions.
