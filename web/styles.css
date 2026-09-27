@@ -739,6 +739,7 @@ button:hover { background: #25445c; border-color: #3488c7; }
 }
 
 .mapping-card-point {
+  width: 100%;
   color: #8ca0b2;
   font-size: 10px;
   overflow: hidden;

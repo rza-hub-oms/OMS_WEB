@@ -8,6 +8,8 @@ import asyncio
 import base64
 import json
 import logging
+import os
+import signal
 import time
 
 from project.model import ProjectSession
@@ -34,8 +36,10 @@ VALID_MODES = ("design", "simulation", "runtime")
 # and re-opens the WebSocket -- this grace period lets that reconnect
 # cancel the shutdown instead of killing the whole app on a refresh.
 SHUTDOWN_GRACE_S = 5.0
-# Browser refreshes no longer terminate the whole Python process.
-# The development launcher owns server lifetime instead.
+# A page refresh drops and reopens the WebSocket within this window,
+# which cancels the pending shutdown (see connect()). Only a real
+# "all browser windows closed" leaves self.active empty for the full
+# grace period, which is what actually triggers process exit below.
 
 
 class ConnectionManager:
@@ -80,7 +84,8 @@ class ConnectionManager:
         except asyncio.CancelledError:
             return
         if not self.active:
-            logger.info("No browser windows connected -- server remains available for reconnect.")
+            logger.info("No browser windows connected -- shutting down.")
+            os.kill(os.getpid(), signal.SIGTERM)
 
     async def broadcast(self, ws: WebSocket, payload: dict) -> None:
         try:

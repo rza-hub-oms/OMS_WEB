@@ -2185,10 +2185,12 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
     tr.className = "mapping-card";
     tr.dataset.groupTag = row.tag;
     tr.classList.toggle("unmapped-row", !nodeValue);
+    const objectLabel = row.object_tag || row.tag;
+    const pointLabel = row.point.startsWith(`${objectLabel}.`) ? row.point.slice(objectLabel.length + 1) : row.point;
     tr.innerHTML = `
       <div class="mapping-card-top" title="${escapeHtml(row.source)}">
-        <span class="mapping-card-object">${escapeHtml(row.tag)}</span>
-        <span class="mapping-card-point">${escapeHtml(row.point)}</span>
+        <span class="mapping-card-object">${escapeHtml(objectLabel)}</span>
+        <span class="mapping-card-point">${escapeHtml(pointLabel)}</span>
         <span class="mapping-card-direction">${direction}</span>
       </div>
       <div class="node-input-wrap">

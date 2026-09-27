@@ -73,7 +73,7 @@ class EmergencyPushButtonBehavior(SimObject):
         # The signal is read-only from the PLC side: the operator presses
         # the simulated E-stop and OMS publishes that state outward.
         return {
-            "pressed": (self.get_pressed, None),
+            "ok": (self.get_not_pressed, None),
         }
 
     # ---------- Serialization ----------
