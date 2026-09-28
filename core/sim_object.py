@@ -15,6 +15,7 @@ class SimObject:
         self.width = width
         self.height = height
         self.layer = 0
+        self.parent_tag = None
 
         # Common machine-object operational state.  These fields are
         # deliberately kept in the model layer so Simulation, PLC mapping,
@@ -45,6 +46,13 @@ class SimObject:
 
     def get_layer(self) -> int:
         return self.layer
+
+    def set_parent_tag(self, value) -> None:
+        value = str(value).strip() if value is not None else ""
+        self.parent_tag = value or None
+
+    def get_parent_tag(self):
+        return self.parent_tag
 
     def set_mode(self, value) -> None:
         value = str(value).lower()
@@ -85,7 +93,7 @@ class SimObject:
 
     def to_dict(self) -> dict:
         """Serialize current state for the web frontend."""
-        state = {"tag_name": self.tag_name, "layer": self.layer, "mode": self.mode, "fault": self.fault, "emergency_stop": self.emergency_stop}
+        state = {"tag_name": self.tag_name, "layer": self.layer, "parent_tag": self.parent_tag, "mode": self.mode, "fault": self.fault, "emergency_stop": self.emergency_stop}
         io_points = self.get_plc_io_points()
         for point_name, (getter, _setter) in io_points.items():
             state[point_name] = getter()

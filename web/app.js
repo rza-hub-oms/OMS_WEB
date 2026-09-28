@@ -254,6 +254,8 @@ let latestLogicRules = [];
 let latestSequences = [];
 let latestSequenceStatus = [];
 let latestAlarms = { definitions: [], active: [], history: [], active_count: 0 };
+let latestHierarchy = [];
+let latestConnections = [];
 // Cache of created DOM elements per tag_name, so we update in place
 // instead of rebuilding the DOM every 50ms (which would restart CSS
 // transitions/animations and cause flicker).
@@ -526,12 +528,24 @@ function renderPropertyPanel() {
     })
     .join("");
 
+  const parentOptions = Object.keys(latestState)
+    .filter(tag => tag !== selectedTag)
+    .sort()
+    .map(tag => `<option value="${escapeHtml(tag)}" ${obj.parent_tag === tag ? "selected" : ""}>${escapeHtml(tag)}</option>`)
+    .join("");
+
   propertyBody.innerHTML = `
     <div class="selected-name">
       <input id="name-input" type="text" value="${selectedTag}">
     </div>
     <div id="status-block">${statusHtml}</div>
     <form id="property-form">
+      <label>Machine Parent
+        <select data-send="parent_tag">
+          <option value="" ${!obj.parent_tag ? "selected" : ""}>(Root)</option>
+          ${parentOptions}
+        </select>
+      </label>
       ${fieldsHtml}
 
       ${
@@ -613,6 +627,14 @@ setMessageHandler((event) => {
     return;
   }
 
+  if (msg.connection_validation !== undefined) {
+    const errors = msg.connection_validation || [];
+    alert(errors.length
+      ? errors.map(e => `Connection ${e.index + 1}: ${e.error}`).join("\n")
+      : "Engineering connections are valid.");
+    return;
+  }
+
   if (msg.plc_validation !== undefined) {
     showValidationResult(msg.plc_validation);
     return;
@@ -664,6 +686,18 @@ setMessageHandler((event) => {
   if (msg.alarms && JSON.stringify(msg.alarms) !== JSON.stringify(latestAlarms)) {
     latestAlarms = msg.alarms;
     renderAlarms();
+  }
+  if (msg.hierarchy) {
+    const key = JSON.stringify(msg.hierarchy) + "|" + omsMode + "|" + [...selectedTags].join(",");
+    if (key !== hierarchyRenderKey) {
+      hierarchyRenderKey = key;
+      latestHierarchy = msg.hierarchy;
+      renderHierarchy();
+    }
+  }
+  if (msg.connections && JSON.stringify(msg.connections) !== JSON.stringify(latestConnections)) {
+    latestConnections = msg.connections;
+    renderConnections();
   }
   render(latestState);
   renderPlcStatus(latestPlc);
@@ -1361,7 +1395,145 @@ function render(state) {
   }
 
   renderComponentsList(state);
+  renderConnectionLines();
   updateSelectedStatus();
+}
+
+let hierarchyRenderKey = null;
+let draggedHierarchyTag = null;
+
+function renderHierarchy() {
+  const root = document.getElementById("engineering-hierarchy");
+  if (!root) return;
+
+  function nodeHtml(node, depth = 0) {
+    const children = (node.children || []).map(child => nodeHtml(child, depth + 1)).join("");
+    const selected = selectedTags.has(node.tag_name) ? " selected" : "";
+    return `<div class="hierarchy-item ${selected}" data-tag="${escapeHtml(node.tag_name)}" draggable="${isDesignMode()}">
+      <div role="button" tabindex="0" class="hierarchy-select" data-tag="${escapeHtml(node.tag_name)}" title="Select ${escapeHtml(node.tag_name)}">
+        ${depth ? "└─ " : "▾ "}${escapeHtml(node.tag_name)}
+      </div>
+      ${children}
+    </div>`;
+  }
+
+  root.innerHTML = latestHierarchy.length
+    ? latestHierarchy.map(node => nodeHtml(node)).join("")
+    : '<p class="empty">No components.</p>';
+
+  root.querySelectorAll(".hierarchy-select").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectComponent(btn.dataset.tag);
+    });
+  });
+
+  if (!isDesignMode()) return;
+
+  root.querySelectorAll(".hierarchy-item").forEach(item => {
+    item.addEventListener("dragstart", (e) => {
+      e.stopPropagation();
+      draggedHierarchyTag = item.dataset.tag;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", item.dataset.tag);
+      item.classList.add("dragging");
+    });
+    item.addEventListener("dragend", (e) => {
+      e.stopPropagation();
+      draggedHierarchyTag = null;
+      item.classList.remove("dragging");
+    });
+    item.addEventListener("dragover", (e) => {
+      const child = draggedHierarchyTag;
+      if (!child || child === item.dataset.tag || isHierarchyDescendant(child, item.dataset.tag)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
+      item.classList.add("drag-over");
+    });
+    item.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.remove("drag-over");
+      const child = draggedHierarchyTag;
+      const parent = item.dataset.tag;
+      if (!child || child === parent || isHierarchyDescendant(child, parent)) return;
+      moveHierarchyItem(child, parent);
+    });
+  });
+}
+
+function hierarchyNodeContains(node, target) {
+  if (!node) return false;
+  for (const child of node.children || []) {
+    if (child.tag_name === target || hierarchyNodeContains(child, target)) return true;
+  }
+  return false;
+}
+
+function findHierarchyNode(nodes, tag) {
+  for (const node of nodes || []) {
+    if (node.tag_name === tag) return node;
+    const found = findHierarchyNode(node.children || [], tag);
+    if (found) return found;
+  }
+  return null;
+}
+
+function isHierarchyDescendant(parentCandidate, target) {
+  const candidate = findHierarchyNode(latestHierarchy || [], parentCandidate);
+  return !!candidate && hierarchyNodeContains(candidate, target);
+}
+
+function moveHierarchyItem(child, parent) {
+  if (!isDesignMode() || !latestState[child]) return;
+  pushHistory();
+  markDirty();
+  send({ action: "set_parent", child, parent });
+}
+
+function renderConnections() {
+  const list = document.getElementById("connection-list");
+  if (!list) return;
+  const connections = latestConnections || [];
+  list.innerHTML = connections.length ? connections.map((c, index) => `
+    <div class="mapping-card connection-card">
+      <div>
+        <b>${escapeHtml(c.source)} → ${escapeHtml(c.target)}</b>
+        <small>${escapeHtml(c.kind || "process")}${c.label ? ` · ${escapeHtml(c.label)}` : ""}</small>
+      </div>
+      ${isDesignMode() ? `<button class="connection-delete" type="button" data-index="${index}">Delete</button>` : ""}
+    </div>
+  `).join("") : '<p class="empty">No engineering connections.</p>';
+
+  list.querySelectorAll(".connection-delete").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (!isDesignMode()) return;
+      pushHistory();
+      markDirty();
+      send({ action: "remove_connection", index: Number(btn.dataset.index) });
+    });
+  });
+}
+
+function renderConnectionLines() {
+  const svg = document.getElementById("connections-layer");
+  if (!svg) return;
+  svg.innerHTML = "";
+  for (const connection of latestConnections || []) {
+    const source = elements[connection.source];
+    const target = elements[connection.target];
+    if (!source || !target) continue;
+    const sx = source.offsetLeft + source.offsetWidth / 2;
+    const sy = source.offsetTop + source.offsetHeight / 2;
+    const tx = target.offsetLeft + target.offsetWidth / 2;
+    const ty = target.offsetTop + target.offsetHeight / 2;
+    const midX = (sx + tx) / 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`);
+    path.setAttribute("class", `connection-path connection-${connection.kind || "process"}`);
+    svg.appendChild(path);
+  }
 }
 
 let componentsListKey = null;
@@ -1786,6 +1958,66 @@ document.getElementById("alarm-add-btn")?.addEventListener("click", () => {
 document.getElementById("alarm-reset-btn")?.addEventListener("click", () => {
   if (!isDesignMode()) return;
   send({ action: "alarm_reset" });
+});
+
+// ---------- Machine hierarchy / engineering connections ----------
+
+document.getElementById("hierarchy-root-btn")?.addEventListener("click", () => {
+  if (!isDesignMode() || !selectedTag) {
+    alert("Select a component first.");
+    return;
+  }
+  if (!latestState[selectedTag]) return;
+  if (!latestState[selectedTag].parent_tag) {
+    return;
+  }
+  pushHistory();
+  markDirty();
+  send({ action: "set_parent", child: selectedTag, parent: null });
+});
+
+const hierarchyRootDrop = document.getElementById("hierarchy-root-drop");
+hierarchyRootDrop?.addEventListener("dragover", (e) => {
+  if (!isDesignMode() || !e.dataTransfer.types.includes("text/plain")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  hierarchyRootDrop.classList.add("drag-over");
+});
+hierarchyRootDrop?.addEventListener("dragleave", () => hierarchyRootDrop.classList.remove("drag-over"));
+hierarchyRootDrop?.addEventListener("drop", (e) => {
+  e.preventDefault();
+  hierarchyRootDrop.classList.remove("drag-over");
+  if (!isDesignMode()) return;
+  const child = draggedHierarchyTag;
+  if (!child || !latestState[child] || !latestState[child].parent_tag) return;
+  moveHierarchyItem(child, null);
+});
+
+
+
+document.getElementById("connection-add-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  const names = Object.keys(latestState).sort();
+  if (names.length < 2) {
+    alert("Create at least two components first.");
+    return;
+  }
+  const source = prompt(`Source component:\n${names.join("\n")}`);
+  if (!source || !latestState[source]) return;
+  const target = prompt(`Target component:\n${names.filter(n => n !== source).join("\n")}`);
+  if (!target || !latestState[target] || target === source) return;
+  const kind = (prompt("Connection type: process / control / signal / mechanical / safety", "process") || "process").trim().toLowerCase();
+  if (!["process", "control", "signal", "mechanical", "safety"].includes(kind)) {
+    alert("Invalid connection type.");
+    return;
+  }
+  pushHistory();
+  markDirty();
+  send({ action: "add_connection", source, target, kind });
+});
+
+document.getElementById("connection-validate-btn")?.addEventListener("click", () => {
+  send({ action: "validate_connections" });
 });
 
 // ---------- Tabs (Properties / PLC Mapping) ----------

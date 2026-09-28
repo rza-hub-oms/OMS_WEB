@@ -2456,3 +2456,94 @@ select:focus-visible {
 .alarm-history-row { display:grid; grid-template-columns:65px 1fr 60px 55px; gap:6px; padding:6px 8px; border-top:1px solid #263746; font-size:9px; color:#9eacb7; }
 .alarm-history-row b { color:#c8d4dc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 @media (max-width: 700px) { .alarm-fields { grid-template-columns:1fr 100px; } .alarm-fields label { grid-column:auto; } }
+/* ---------- Engineering hierarchy / connections ---------- */
+#connections-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.component { z-index: 1; }
+.connection-path {
+  fill: none;
+  stroke: #66849a;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  opacity: .72;
+}
+.connection-path.connection-safety { stroke: #e35b63; }
+.connection-path.connection-control { stroke: #4aa3df; }
+.connection-path.connection-signal { stroke: #c9822e; }
+.connection-path.connection-mechanical { stroke: #9b7bd6; }
+.connection-path.connection-process { stroke: #66849a; }
+.hierarchy-tree { padding: 8px 10px; border-bottom: 1px solid #263746; }
+.hierarchy-node { padding: 4px 0 4px 14px; }
+.hierarchy-root { padding-left: 2px; font-weight: 600; }
+.hierarchy-node button, .hierarchy-root button {
+  background: transparent; border: 0; color: #dbe7f0; padding: 2px 4px; text-align: left;
+}
+.connection-title { padding: 10px 10px 4px; color: #8fa4b5; font-size: 11px; text-transform: uppercase; }
+.connection-card { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+.connection-card small { color: #8fa4b5; display:block; }
+.connection-delete { color: #f36c6c; }
+
+/* ---------- Engineering hierarchy editor ---------- */
+.engineering-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.engineering-section-title {
+  color: #d7e2eb;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.engineering-action {
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.engineering-connections-toolbar {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #263746;
+}
+.hierarchy-root-drop {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px dashed #3c5366;
+  border-radius: 6px;
+  color: #8fa4b5;
+  font-size: 11px;
+  text-align: center;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.hierarchy-root-drop.drag-over {
+  border-color: #4aa3df;
+  background: rgba(74,163,223,.10);
+  color: #d7e2eb;
+}
+.hierarchy-item {
+  border-radius: 5px;
+}
+.hierarchy-item.dragging {
+  opacity: .45;
+}
+.hierarchy-item.drag-over {
+  outline: 1px dashed #4aa3df;
+  background: rgba(74,163,223,.08);
+}
+.hierarchy-select {
+  width: 100%;
+  text-align: left;
+  cursor: grab; padding: 4px 6px;
+}
+.hierarchy-item.selected > .hierarchy-select {
+  background: rgba(74,163,223,.12);
+}

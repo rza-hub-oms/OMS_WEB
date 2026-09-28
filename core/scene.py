@@ -131,6 +131,8 @@ class Scene:
         # connection settings (not the live connection itself).
         self.plc_connection = {}
 
+        self.connections = []
+
         self._cylinder_previously_extended = {}
         # Simulation-only control rules. Runtime never executes these; live PLC
         # commands remain the source of truth there.
@@ -155,6 +157,13 @@ class Scene:
         self.plc_mapping = [
             mapping for mapping in self.plc_mapping
             if mapping.get("object_tag") != tag_name
+        ]
+        for other in self.objects.values():
+            if getattr(other, "parent_tag", None) == tag_name:
+                other.parent_tag = None
+        self.connections = [
+            c for c in self.connections
+            if c.get("source") != tag_name and c.get("target") != tag_name
         ]
         return True
 
@@ -184,10 +193,18 @@ class Scene:
                 mapping["object_tag"] = new_name
 
         for other in self.objects.values():
+            if getattr(other, "parent_tag", None) == tag_name:
+                other.parent_tag = new_name
             if isinstance(other, SensorBehavior) and other.watch_tag == tag_name:
                 other.watch_tag = new_name
             elif isinstance(other, CylinderBehavior) and other.target_tag == tag_name:
                 other.target_tag = new_name
+
+        for connection in self.connections:
+            if connection.get("source") == tag_name:
+                connection["source"] = new_name
+            if connection.get("target") == tag_name:
+                connection["target"] = new_name
 
         return True
 
@@ -234,6 +251,7 @@ class Scene:
         self._type_counters.clear()
         self._cylinder_previously_extended.clear()
         self.plc_mapping.clear()
+        self.connections.clear()
         self.logic_rules.clear()
         self.logic_engine.reset()
         self.sequences.clear()
@@ -425,10 +443,90 @@ class Scene:
         """Return current alarm definitions, active alarms and history."""
         return self.alarm_engine.snapshot()
 
+    # ---------- Machine hierarchy / engineering connections ----------
+
+    def set_parent(self, child_tag: str, parent_tag: str | None) -> bool:
+        child = self.objects.get(child_tag)
+        parent = self.objects.get(parent_tag) if parent_tag else None
+        if child is None or child_tag == parent_tag:
+            return False
+        if parent_tag and parent is None:
+            return False
+        cursor = parent_tag
+        seen = set()
+        while cursor:
+            if cursor in seen:
+                return False
+            seen.add(cursor)
+            if cursor == child_tag:
+                return False
+            node = self.objects.get(cursor)
+            cursor = getattr(node, "parent_tag", None) if node else None
+        child.set_parent_tag(parent_tag)
+        return True
+
+    def hierarchy(self) -> list[dict]:
+        children = {name: [] for name in self.objects}
+        roots = []
+        for name, obj in self.objects.items():
+            parent = getattr(obj, "parent_tag", None)
+            if parent in children and parent != name:
+                children[parent].append(name)
+            else:
+                roots.append(name)
+        for values in children.values():
+            values.sort()
+        roots.sort()
+
+        def node(name):
+            obj = self.objects[name]
+            return {
+                "tag_name": name,
+                "type": getattr(obj, "TYPE", name.split("_")[0].lower()),
+                "children": [node(child) for child in children[name]],
+            }
+        return [node(name) for name in roots]
+
+    def add_connection(self, source: str, target: str, kind: str = "process", label: str = "") -> bool:
+        if source not in self.objects or target not in self.objects or source == target:
+            return False
+        kind = str(kind or "process").strip().lower()
+        if kind not in {"process", "control", "signal", "mechanical", "safety"}:
+            return False
+        if any(c.get("source") == source and c.get("target") == target and c.get("kind") == kind for c in self.connections):
+            return False
+        self.connections.append({"source": source, "target": target, "kind": kind, "label": str(label or "")})
+        return True
+
+    def remove_connection(self, index: int) -> bool:
+        if not isinstance(index, int) or index < 0 or index >= len(self.connections):
+            return False
+        self.connections.pop(index)
+        return True
+
+    def validate_connections(self) -> list[dict]:
+        errors = []
+        for index, connection in enumerate(self.connections):
+            if connection.get("source") not in self.objects:
+                errors.append({"index": index, "error": "Connection source component does not exist."})
+            if connection.get("target") not in self.objects:
+                errors.append({"index": index, "error": "Connection target component does not exist."})
+            if connection.get("source") == connection.get("target"):
+                errors.append({"index": index, "error": "A component cannot connect to itself."})
+        return errors
+
     def to_dict(self) -> dict:
         """Serialize every component's current state, keyed by tag_name.
         This is what gets pushed to the browser over WebSocket each tick."""
-        return {name: obj.to_dict() for name, obj in self.objects.items()}
+        result = {}
+        for name, obj in self.objects.items():
+            state = obj.to_dict()
+            state["parent_tag"] = getattr(obj, "parent_tag", None)
+            result[name] = state
+        return result
+
+    def engineering_snapshot(self) -> dict:
+        return {"hierarchy": self.hierarchy(), "connections": list(self.connections)}
 
     def validate_logic_rules(self):
         """Return validation errors for configured simulation rules."""

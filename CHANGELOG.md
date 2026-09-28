@@ -82,3 +82,13 @@
 - Mapping Search opens the existing parsed S7/OPC UA address picker for every tag.
 - PLC mapping validation and force support include central tags.
 - Bound internal-tag connections persist in `.oms` projects.
+
+
+## v10.1 — Hierarchy editor usability
+
+- Added a dedicated Machine Hierarchy editor in the Engineering tab.
+- Components can be dragged onto another component to change their parent.
+- Components can be dragged to the Root drop area or moved to Root with a button.
+- Clarified that engineering connections are separate from hierarchy.
+- Replaced ambiguous `+` / `✓` connection controls with `+ Connection` / `✓ Validate`.
+- Added hierarchy regression tests for parent assignment, root moves, and cycle prevention.

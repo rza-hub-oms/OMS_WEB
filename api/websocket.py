@@ -286,6 +286,33 @@ async def websocket_endpoint(ws: WebSocket):
                     if not session.scene.remove(tag_name):
                         logger.warning("Component %r not found", tag_name)
 
+                elif action == "set_parent":
+                    if session.mode != "design":
+                        continue
+                    session.scene.set_parent(
+                        str(command.get("child", "")),
+                        command.get("parent"),
+                    )
+                elif action == "add_connection":
+                    if session.mode != "design":
+                        continue
+                    session.scene.add_connection(
+                        str(command.get("source", "")),
+                        str(command.get("target", "")),
+                        command.get("kind", "process"),
+                        command.get("label", ""),
+                    )
+                elif action == "remove_connection":
+                    if session.mode != "design":
+                        continue
+                    try:
+                        session.scene.remove_connection(int(command.get("index", -1)))
+                    except (TypeError, ValueError):
+                        pass
+                elif action == "validate_connections":
+                    await ws.send_text(json.dumps({
+                        "connection_validation": session.scene.validate_connections(),
+                    }))
                 elif action == "plc_connect":
                     await _plc_connect(session, command["backend"], command.get("params", {}))
                 elif action == "plc_disconnect":
@@ -612,6 +639,8 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
                     "sequences": session.scene.sequences,
                     "sequence_status": session.scene.sequence_engine.current_status(session.scene.sequences),
                     "alarms": session.scene.alarm_snapshot(),
+                    "hierarchy": session.scene.hierarchy(),
+                    "connections": list(session.scene.connections),
                     "project": {
                         "name": session.project.name,
                         "version": session.project.version,

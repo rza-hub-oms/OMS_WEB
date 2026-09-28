@@ -113,7 +113,7 @@
 
     <div id="canvas-wrap">
       <div id="canvas-viewport">
-        <div id="canvas"></div>
+        <div id="canvas"><svg id="connections-layer" aria-hidden="true"></svg></div>
       </div>
     </div>
 
@@ -128,6 +128,7 @@
         <button type="button" class="tab" data-tab="monitor">PLC Monitor</button>
         <button type="button" class="tab" data-tab="tags">Tags</button>
         <button type="button" class="tab" data-tab="alarms">Alarms</button>
+        <button type="button" class="tab" data-tab="engineering">Engineering</button>
         <button type="button" class="tab" data-tab="components">Components</button>
       </div>
 
@@ -224,6 +225,27 @@
         <div id="alarm-list" class="mapping-card-list"></div>
         <div class="alarm-history-title">History</div>
         <div id="alarm-history" class="mapping-card-list"></div>
+      </div>
+      <div id="engineering-tab" class="tab-panel" data-panel="engineering">
+        <div class="engineering-toolbar">
+          <div class="engineering-section-title">Machine Hierarchy</div>
+          <div class="mapping-actions">
+            <button id="hierarchy-root-btn" class="engineering-action" title="Move the selected component to the root">Move to Root</button>
+          </div>
+        </div>
+        <p class="hint">Drag a component onto another component to make it a child. Drag it onto the root drop area to move it back to the top level.</p>
+        <div id="hierarchy-root-drop" class="hierarchy-root-drop" data-root-drop="true">Drop here to move to Root</div>
+        <div id="engineering-hierarchy" class="hierarchy-tree"></div>
+
+        <div class="engineering-toolbar engineering-connections-toolbar">
+          <div class="engineering-section-title">Connections</div>
+          <div class="mapping-actions">
+            <button id="connection-add-btn" class="engineering-action" title="Add an engineering connection">+ Connection</button>
+            <button id="connection-validate-btn" class="engineering-action" title="Validate engineering connections">✓ Validate</button>
+          </div>
+        </div>
+        <p class="hint">Connections document process, control, signal, mechanical and safety relationships. They are separate from the machine hierarchy.</p>
+        <div id="connection-list" class="mapping-card-list"></div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
           <ul id="components-list"></ul>

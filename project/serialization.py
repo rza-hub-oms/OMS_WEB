@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.scene import COMPONENT_REGISTRY
 
-PROJECT_VERSION = 9
+PROJECT_VERSION = 10
 
 _SETTER_OVERRIDES = {
     "rotation": "rotation_value",
@@ -50,6 +50,7 @@ def _build_objects(objects_data) -> dict:
                 setter(value)
             except (TypeError, ValueError):
                 continue
+        obj.set_parent_tag(state.get("parent_tag"))
         built[obj.tag_name] = obj
     return built
 
@@ -59,7 +60,7 @@ def scene_to_project_dict(scene, *, name="Untitled", metadata=None) -> dict:
         "version": PROJECT_VERSION,
         "name": name,
         "metadata": dict(metadata or {}),
-        "objects": [obj.to_dict() for obj in scene.objects.values()],
+        "objects": [{**obj.to_dict(), "parent_tag": getattr(obj, "parent_tag", None)} for obj in scene.objects.values()],
         "plc_mapping": list(scene.plc_mapping),
         "plc_connection": dict(scene.plc_connection),
         "type_counters": dict(scene._type_counters),
@@ -67,6 +68,7 @@ def scene_to_project_dict(scene, *, name="Untitled", metadata=None) -> dict:
         "sequences": list(scene.sequences),
         "tags": scene.tags.to_dict(),
         "alarms": list(scene.alarm_engine.definitions),
+        "connections": list(scene.connections),
     }
 
 
@@ -77,11 +79,13 @@ def load_project_dict(scene, data: dict) -> dict:
     scene._cylinder_previously_extended.clear()
     scene.plc_mapping = list(payload.get("plc_mapping", []))
     scene.plc_connection = dict(payload.get("plc_connection", {}))
+    scene.connections = list(payload.get("connections", []))
     scene._type_counters = dict(payload.get("type_counters", {}))
     scene.logic_rules = list(payload.get("logic_rules", []))
     scene.sequences = list(payload.get("sequences", []))
     scene.sequence_engine.reset()
     scene.objects.update(_build_objects(payload.get("objects", [])))
+    scene.connections = [c for c in scene.connections if isinstance(c, dict) and c.get("source") in scene.objects and c.get("target") in scene.objects and c.get("source") != c.get("target")]
     scene.tags.load_custom(payload.get("tags", []))
     scene.tags.sync()
     scene.alarm_engine.set_definitions(payload.get("alarms", []))

@@ -532,3 +532,67 @@ def test_alarm_project_roundtrip():
     info = load_project_dict(other, payload)
     assert info["name"] == "AlarmProject"
     assert other.alarm_engine.definitions[0]["expression"] == 'tag("Conveyor_1.fault")'
+
+
+class EngineeringStructureTests(unittest.TestCase):
+    def test_machine_hierarchy_rejects_cycles(self):
+        scene = Scene()
+        a = scene.create_component("conveyor", 0, 0)
+        b = scene.create_component("sensor", 100, 0)
+        c = scene.create_component("motor", 200, 0)
+        self.assertTrue(scene.set_parent(b.tag_name, a.tag_name))
+        self.assertTrue(scene.set_parent(c.tag_name, b.tag_name))
+        self.assertFalse(scene.set_parent(a.tag_name, c.tag_name))
+        self.assertEqual(b.parent_tag, a.tag_name)
+        self.assertEqual(c.parent_tag, b.tag_name)
+
+    def test_connections_are_created_validated_and_cleaned_on_delete(self):
+        scene = Scene()
+        a = scene.create_component("conveyor", 0, 0)
+        b = scene.create_component("sensor", 100, 0)
+        self.assertTrue(scene.add_connection(a.tag_name, b.tag_name, "signal"))
+        self.assertFalse(scene.add_connection(a.tag_name, b.tag_name, "signal"))
+        self.assertEqual(scene.validate_connections(), [])
+        scene.remove(b.tag_name)
+        self.assertEqual(scene.connections, [])
+
+    def test_hierarchy_and_connections_round_trip(self):
+        scene = Scene()
+        a = scene.create_component("conveyor", 0, 0)
+        b = scene.create_component("sensor", 100, 0)
+        self.assertTrue(scene.set_parent(b.tag_name, a.tag_name))
+        self.assertTrue(scene.add_connection(a.tag_name, b.tag_name, "signal", "box detected"))
+        payload = scene_to_project_dict(scene)
+        restored = Scene()
+        load_project_dict(restored, payload)
+        self.assertEqual(restored.objects[b.tag_name].parent_tag, a.tag_name)
+        self.assertEqual(restored.connections[0]["kind"], "signal")
+        self.assertEqual(restored.connections[0]["label"], "box detected")
+
+    def test_emergency_stop_exposes_pressed_tag(self):
+        scene = Scene()
+        estop = scene.create_component("emergency_push_button", 0, 0)
+        names = {signal.name for signal in estop.get_io_signals()}
+        self.assertIn("pressed", names)
+
+class HierarchyTests(unittest.TestCase):
+    def test_set_parent_and_prevent_cycle(self):
+        scene = Scene()
+        scene.create_component("conveyor", 0, 0)
+        scene.create_component("sensor", 10, 10)
+        scene.create_component("motor", 20, 20)
+        self.assertTrue(scene.set_parent("Sensor_1", "Conveyor_1"))
+        self.assertTrue(scene.set_parent("Motor_1", "Conveyor_1"))
+        self.assertFalse(scene.set_parent("Conveyor_1", "Sensor_1"))
+        tree = scene.hierarchy()
+        self.assertEqual(tree[0]["tag_name"], "Conveyor_1")
+        self.assertEqual({c["tag_name"] for c in tree[0]["children"]}, {"Motor_1", "Sensor_1"})
+
+    def test_move_child_back_to_root(self):
+        scene = Scene()
+        scene.create_component("conveyor", 0, 0)
+        scene.create_component("sensor", 10, 10)
+        self.assertTrue(scene.set_parent("Sensor_1", "Conveyor_1"))
+        self.assertTrue(scene.set_parent("Sensor_1", None))
+        roots = {node["tag_name"] for node in scene.hierarchy()}
+        self.assertEqual(roots, {"Conveyor_1", "Sensor_1"})

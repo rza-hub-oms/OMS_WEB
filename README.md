@@ -70,7 +70,7 @@ The tests cover conveyor reverse motion, elapsed-time simulation, typed signals,
 
 ## Project files
 
-`.oms` files are JSON documents. Current project format version is **6**. Older project files are migrated in memory when opened.
+`.oms` files are JSON documents. Current project format version is **10**. Older project files are migrated in memory when opened.
 
 ## Frontend structure
 
@@ -91,5 +91,12 @@ Simulation mode now includes a deterministic step/transition sequence engine. A 
 OMS now exposes one central tag registry for machine I/O and internal variables.
 Component signals are represented as stable tags such as `Conveyor_1.running`
 and `Motor_1.speed`. Internal tags can be created from the Tags panel and are
-persisted in `.oms` projects. The registry is the common data contract for
-future alarms, trends, Runtime and richer PLC mapping.
+persisted in `.oms` projects. The registry is the common data contract for alarms, engineering structure, trends, Runtime and richer PLC mapping.
+
+## Engineering Structure (v10)
+Components can belong to a machine hierarchy through a `parent_tag`. Engineering connections are stored separately from simulation logic and can describe process, control, signal, mechanical and safety relationships. Connections are validated, persisted in `.oms` projects, and cleaned automatically when referenced components are renamed or deleted.
+
+
+### Engineering hierarchy editor
+
+In Design mode, open **Inspector → Engineering → Machine Hierarchy**. Drag a component onto another component to make it a child. Drag a component to **Drop here to move to Root**, or select it and use **Move to Root**. The **Connections** section below is separate and is used for process/control/signal/mechanical/safety relationships.
