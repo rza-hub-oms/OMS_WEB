@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.scene import COMPONENT_REGISTRY
 
-PROJECT_VERSION = 10
+PROJECT_VERSION = 11
 
 _SETTER_OVERRIDES = {
     "rotation": "rotation_value",
@@ -55,7 +55,7 @@ def _build_objects(objects_data) -> dict:
     return built
 
 
-def scene_to_project_dict(scene, *, name="Untitled", metadata=None) -> dict:
+def scene_to_project_dict(scene, *, name="Untitled", metadata=None, production=None) -> dict:
     return {
         "version": PROJECT_VERSION,
         "name": name,
@@ -69,6 +69,7 @@ def scene_to_project_dict(scene, *, name="Untitled", metadata=None) -> dict:
         "tags": scene.tags.to_dict(),
         "alarms": list(scene.alarm_engine.definitions),
         "connections": list(scene.connections),
+        "production": dict(production or {}),
     }
 
 

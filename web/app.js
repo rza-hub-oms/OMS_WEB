@@ -26,6 +26,15 @@ let simulationPanY = 0;
 let omsMode = "design";
 let latestPlc = {};
 let latestTags = [];
+let latestDiagnostics = null;
+let latestTrends = { selected: [], interval_s: 1, samples: [] };
+let latestProduction = { config: {}, total_count: 0, good_count: 0, reject_count: 0 };
+let productionRenderKey = "";
+let selectedTrendTags = new Set();
+let trendTagRenderKey = "";
+let trendRows = [""];
+let trendBackendKey = null;
+let trendChartRenderKey = "";
 
 let currentProjectFilename = null;
 
@@ -640,6 +649,12 @@ setMessageHandler((event) => {
     return;
   }
 
+  if (msg.diagnostics !== undefined) {
+    latestDiagnostics = msg.diagnostics;
+    renderDiagnostics();
+    return;
+  }
+
   if (msg.project_data !== undefined) {
     saveProjectData(msg.project_data);
     return;
@@ -698,6 +713,14 @@ setMessageHandler((event) => {
   if (msg.connections && JSON.stringify(msg.connections) !== JSON.stringify(latestConnections)) {
     latestConnections = msg.connections;
     renderConnections();
+  }
+  if (msg.trends) {
+    latestTrends = msg.trends;
+    renderTrends();
+  }
+  if (msg.production) {
+    latestProduction = msg.production;
+    renderProduction();
   }
   render(latestState);
   renderPlcStatus(latestPlc);
@@ -1646,6 +1669,274 @@ function renderAlarms() {
   ).join("") || '<p class="empty">No alarm events yet.</p>';
 }
 
+
+function numericTrendTags() {
+  return [...latestTags]
+    .filter(t => ["int", "integer", "float", "real", "number"].includes(String(t.datatype || "").toLowerCase()) && typeof t.value === "number" && !Number.isNaN(t.value))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function sendTrendTags() {
+  selectedTrendTags = new Set(trendRows.filter(Boolean));
+  trendTagRenderKey = "";
+  send({ action: "set_trend_tags", tags: [...selectedTrendTags] });
+}
+
+function renderTrends() {
+  const list = document.getElementById("trend-tag-list");
+  const chart = document.getElementById("trend-chart");
+  const legend = document.getElementById("trend-legend");
+  const empty = document.getElementById("trend-empty");
+  if (!list || !chart || !legend || !empty) return;
+
+  const running = latestTrends.running !== false;
+  const startBtn = document.getElementById("trends-start-btn");
+  const pauseBtn = document.getElementById("trends-pause-btn");
+  if (startBtn) startBtn.disabled = running;
+  if (pauseBtn) pauseBtn.disabled = !running;
+
+  const iv = document.getElementById("trend-interval");
+  const ivKey = String(latestTrends.interval_s ?? 1);
+  if (iv && iv.dataset.serverValue !== ivKey) {
+    iv.dataset.serverValue = ivKey;
+    if (document.activeElement !== iv) iv.value = ivKey;
+  }
+
+  const available = numericTrendTags();
+
+  // Sync the rows from the backend only when the backend selection changed
+  // (reconnect, project load) and differs from what is shown locally.
+  const backendSel = Array.isArray(latestTrends.selected) ? latestTrends.selected : [];
+  const backendKey = backendSel.join("|");
+  if (backendKey !== trendBackendKey) {
+    trendBackendKey = backendKey;
+    if (backendKey !== trendRows.filter(Boolean).join("|")) {
+      trendRows = backendSel.length ? [...backendSel] : [""];
+    }
+  }
+  selectedTrendTags = new Set(trendRows.filter(Boolean));
+
+  const tagKey = available.map(t => t.name).join("|") + "#" + trendRows.join(",");
+  if (tagKey !== trendTagRenderKey) {
+    trendTagRenderKey = tagKey;
+
+    if (!available.length) {
+      list.innerHTML = '<p class="empty">No numeric tags are currently available.</p>';
+    } else {
+      const used = new Set(trendRows.filter(Boolean));
+      list.innerHTML = trendRows.map((current, i) => {
+        const opts = available
+          .filter(t => t.name === current || !used.has(t.name))
+          .map(t => `<option value="${escapeHtml(t.name)}" ${t.name === current ? "selected" : ""}>${escapeHtml(t.name)} (${escapeHtml(t.datatype)})</option>`)
+          .join("");
+        return `<div class="trend-select-row" data-index="${i}">
+          <select class="trend-select"><option value="">Select tag…</option>${opts}</select>
+          <button type="button" class="trend-row-remove" title="Remove">✕</button>
+        </div>`;
+      }).join("") + '<button type="button" id="trend-add-row" class="engineering-action">＋ Add tag</button>';
+
+      list.querySelectorAll(".trend-select-row").forEach(rowEl => {
+        const i = Number(rowEl.dataset.index);
+        rowEl.querySelector(".trend-select").addEventListener("change", e => {
+          trendRows[i] = e.target.value;
+          sendTrendTags();
+        });
+        rowEl.querySelector(".trend-row-remove").addEventListener("click", () => {
+          trendRows.splice(i, 1);
+          if (!trendRows.length) trendRows = [""];
+          sendTrendTags();
+        });
+      });
+      document.getElementById("trend-add-row")?.addEventListener("click", () => {
+        trendRows.push("");
+        renderTrends();
+      });
+    }
+  }
+
+  renderTrendChart();
+}
+
+function renderTrendChart() {
+  const chart = document.getElementById("trend-chart");
+  const legend = document.getElementById("trend-legend");
+  const empty = document.getElementById("trend-empty");
+  if (!chart || !legend || !empty) return;
+
+  const names = [...selectedTrendTags];
+  const samples = latestTrends.samples || [];
+  const width = chart.clientWidth || 720, height = chart.clientHeight || 300, left = 52, right = 18, top = 18, bottom = 34;
+  const chartKey = `${width}x${height}|${names.join("|")}::${samples.length}:${samples.length ? samples[samples.length - 1].timestamp : 0}`;
+  if (chartKey === trendChartRenderKey) return;
+  trendChartRenderKey = chartKey;
+  const plotW = width - left - right, plotH = height - top - bottom;
+  chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  if (!names.length || !samples.length) {
+    chart.innerHTML = `<rect class="trend-plot-bg" x="${left}" y="${top}" width="${plotW}" height="${plotH}" rx="6"></rect><text class="trend-chart-empty" x="${width/2}" y="${height/2}" text-anchor="middle">No trend samples yet</text>`;
+    legend.innerHTML = "";
+    empty.classList.toggle("hidden", names.length > 0);
+    return;
+  }
+  empty.classList.add("hidden");
+
+  const pointsByName = {};
+  let min = Infinity, max = -Infinity;
+  for (const name of names) {
+    const pts = samples.map(s => ({ t: s.timestamp, v: s.values?.[name] })).filter(p => typeof p.v === "number" && Number.isFinite(p.v));
+    pointsByName[name] = pts;
+    for (const p of pts) { min = Math.min(min, p.v); max = Math.max(max, p.v); }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    chart.innerHTML = `<rect class="trend-plot-bg" x="${left}" y="${top}" width="${plotW}" height="${plotH}" rx="6"></rect><text class="trend-chart-empty" x="${width/2}" y="${height/2}" text-anchor="middle">Waiting for samples…</text>`;
+    legend.innerHTML = "";
+    return;
+  }
+  if (min === max) { min -= 1; max += 1; }
+  const t0 = samples[0].timestamp, t1 = samples[samples.length - 1].timestamp || t0 + 1;
+  const tx = t => left + ((t - t0) / Math.max(1e-9, t1 - t0)) * plotW;
+  const ty = v => top + (1 - (v - min) / (max - min)) * plotH;
+  const palette = ["#5aa9e6", "#e6a157", "#6bc48f", "#c47be8", "#e36b7a", "#a9b45a"];
+
+  let html = `<rect class="trend-plot-bg" x="${left}" y="${top}" width="${plotW}" height="${plotH}" rx="6"></rect>`;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + plotH * i / 4;
+    const value = max - (max - min) * i / 4;
+    html += `<line class="trend-grid" x1="${left}" y1="${y}" x2="${left+plotW}" y2="${y}"></line>`;
+    html += `<text class="trend-axis" x="${left-8}" y="${y+4}" text-anchor="end">${Number(value).toFixed(1)}</text>`;
+  }
+  for (const [idx, name] of names.entries()) {
+    const pts = pointsByName[name];
+    if (!pts.length) continue;
+    const color = palette[idx % palette.length];
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${tx(p.t).toFixed(1)},${ty(p.v).toFixed(1)}`).join(" ");
+    html += `<path class="trend-line" d="${d}" stroke="${color}"></path>`;
+  }
+  html += `<text class="trend-axis" x="${left}" y="${height-8}">${new Date(t0*1000).toLocaleTimeString()}</text>`;
+  html += `<text class="trend-axis" x="${left+plotW}" y="${height-8}" text-anchor="end">${new Date(t1*1000).toLocaleTimeString()}</text>`;
+  chart.innerHTML = html;
+  legend.innerHTML = names.map((name, idx) => `<span class="trend-legend-item"><i style="background:${palette[idx % palette.length]}"></i>${escapeHtml(name)}</span>`).join("");
+}
+
+document.getElementById("trends-clear-btn")?.addEventListener("click", () => {
+  send({ action: "clear_trends" });
+});
+
+document.getElementById("trends-start-btn")?.addEventListener("click", () => send({ action: "set_trend_running", running: true }));
+document.getElementById("trends-pause-btn")?.addEventListener("click", () => send({ action: "set_trend_running", running: false }));
+
+document.getElementById("trend-interval")?.addEventListener("change", e => {
+  const v = Number(e.target.value);
+  if (Number.isFinite(v) && v > 0) send({ action: "set_trend_interval", interval_s: v });
+});
+
+function toggleTrendBig(force) {
+  const tab = document.getElementById("trends-tab");
+  const btn = document.getElementById("trends-big-btn");
+  if (!tab) return;
+  const on = force !== undefined ? force : !tab.classList.contains("trend-big");
+  tab.classList.toggle("trend-big", on);
+  if (btn) btn.textContent = on ? "✕ Close" : "⛶ Enlarge";
+  trendChartRenderKey = "";
+  renderTrendChart();
+}
+document.getElementById("trends-big-btn")?.addEventListener("click", () => toggleTrendBig());
+document.addEventListener("keydown", e => { if (e.key === "Escape") toggleTrendBig(false); });
+
+
+function booleanProductionTags() {
+  return latestTags.filter(t => String(t.datatype).toLowerCase() === "bool").sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderProduction() {
+  const tags = booleanProductionTags();
+  const cfg = latestProduction.config || {};
+  const selectIds = ["production-trigger", "production-reject-trigger", "production-running"];
+  const values = [cfg.production_trigger || "", cfg.reject_trigger || "", cfg.running_tag || ""];
+  for (let i = 0; i < selectIds.length; i++) {
+    const el = document.getElementById(selectIds[i]);
+    if (!el) continue;
+    const key = tags.map(t => t.name).join("|") + "::" + values[i];
+    if (el.dataset.renderKey !== key) {
+      el.dataset.renderKey = key;
+      el.innerHTML = `<option value="">${i === 0 ? "Select production trigger…" : "None"}</option>` + tags.map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join("");
+      el.value = values[i];
+    }
+  }
+  const ideal = document.getElementById("production-ideal-cycle");
+  const idealKey = String(cfg.ideal_cycle_s || "");
+  if (ideal && ideal.dataset.serverValue !== idealKey) {
+    ideal.dataset.serverValue = idealKey;
+    if (document.activeElement !== ideal) ideal.value = idealKey;
+  }
+
+  const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  setText("production-total", latestProduction.total_count ?? 0);
+  setText("production-good", latestProduction.good_count ?? 0);
+  setText("production-reject", latestProduction.reject_count ?? 0);
+  setText("production-cycle", Number.isFinite(latestProduction.cycle_time_s) ? `${latestProduction.cycle_time_s.toFixed(1)} s` : "—");
+  setText("production-availability", `${((latestProduction.availability || 0) * 100).toFixed(1)}%`);
+  setText("production-performance", `${((latestProduction.performance || 0) * 100).toFixed(1)}%`);
+  setText("production-quality", `${((latestProduction.quality || 0) * 100).toFixed(1)}%`);
+  setText("production-oee", `${((latestProduction.oee || 0) * 100).toFixed(1)}%`);
+}
+
+document.getElementById("production-apply-btn")?.addEventListener("click", () => {
+  if (!isDesignMode()) return;
+  const config = {
+    production_trigger: document.getElementById("production-trigger")?.value || "",
+    reject_trigger: document.getElementById("production-reject-trigger")?.value || "",
+    running_tag: document.getElementById("production-running")?.value || "",
+    ideal_cycle_s: Number(document.getElementById("production-ideal-cycle")?.value || 0),
+  };
+  if (!config.production_trigger) {
+    alert("Select a production trigger tag first.");
+    return;
+  }
+  send({ action: "set_production_config", config });
+  markDirty();
+});
+
+document.getElementById("production-reset-btn")?.addEventListener("click", () => {
+  send({ action: "reset_production" });
+});
+
+function renderDiagnostics() {
+  const summary = document.getElementById("diagnostics-summary");
+  const list = document.getElementById("diagnostics-list");
+  if (!summary || !list) return;
+  if (!latestDiagnostics) {
+    summary.className = "diagnostics-summary";
+    summary.textContent = "Run Diagnostics to check this project.";
+    list.innerHTML = "";
+    return;
+  }
+
+  const counts = latestDiagnostics.counts || { error: 0, warning: 0, info: 0 };
+  const total = counts.error + counts.warning + counts.info;
+  summary.className = `diagnostics-summary ${counts.error ? "diag-error" : "diag-ok"}`;
+  summary.innerHTML = counts.error
+    ? `<b>${counts.error} error${counts.error === 1 ? "" : "s"}</b> · ${counts.warning} warning${counts.warning === 1 ? "" : "s"} · ${counts.info} info`
+    : `<b>Project is valid</b> · ${counts.warning} warning${counts.warning === 1 ? "" : "s"} · ${counts.info} info`;
+
+  if (!total) {
+    list.innerHTML = '<div class="mapping-card diagnostic-card diag-info"><div class="diagnostic-message">No diagnostic issues found.</div></div>';
+    return;
+  }
+
+  list.innerHTML = (latestDiagnostics.issues || []).map(issue => `
+    <div class="mapping-card diagnostic-card diag-${escapeHtml(issue.level || "info")}">
+      <div class="diagnostic-head">
+        <span class="diagnostic-level">${escapeHtml(String(issue.level || "info").toUpperCase())}</span>
+        <span class="diagnostic-category">${escapeHtml(issue.category || "General")}</span>
+        ${issue.object_tag ? `<b>${escapeHtml(issue.object_tag)}</b>` : ""}
+      </div>
+      <div class="diagnostic-message">${escapeHtml(issue.message || "")}</div>
+      ${issue.detail ? `<span class="diagnostic-detail">${escapeHtml(issue.detail)}</span>` : ""}
+    </div>
+  `).join("");
+}
+
 function renderComponentsList(state) {
   const list = document.getElementById("components-list");
   const tags = Object.keys(state);
@@ -2020,6 +2311,10 @@ document.getElementById("connection-validate-btn")?.addEventListener("click", ()
   send({ action: "validate_connections" });
 });
 
+document.getElementById("diagnostics-run-btn")?.addEventListener("click", () => {
+  send({ action: "run_diagnostics" });
+});
+
 // ---------- Tabs (Properties / PLC Mapping) ----------
 
 document.querySelectorAll(".tabs .tab").forEach((tabBtn) => {
@@ -2303,6 +2598,7 @@ document.getElementById("monitor-filter")?.addEventListener("input", () => {
 // ---------- PLC mapping table ----------
 
 let mappingRowsKey = null;
+let collapsedGroups = new Set();
 let mappingCells = {}; // "tag|point" -> { nodeInput, liveCell }
 
 function mappingIdentity(row) {
@@ -2393,10 +2689,27 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
       const headerRow = document.createElement("div");
       headerRow.className = "mapping-group-header";
       headerRow.dataset.groupTag = row.tag;
-      headerRow.innerHTML = `<span class="group-arrow">▼</span><span class="group-header-label">${escapeHtml(row.tag)}</span>`;
+      
+      // Check if this group was previously collapsed
+      const isCollapsed = collapsedGroups.has(row.tag);
+      if (isCollapsed) {
+        headerRow.classList.add("collapsed");
+      }
+      
+      // Render the correct arrow indicator based on status
+      headerRow.innerHTML = `<span class="group-arrow">${isCollapsed ? "▶" : "▼"}</span><span class="group-header-label">${escapeHtml(row.tag)}</span>`;
+      
       headerRow.addEventListener("click", () => {
         const collapsed = headerRow.classList.toggle("collapsed");
         headerRow.querySelector(".group-arrow").textContent = collapsed ? "▶" : "▼";
+        
+        // Track the persistence state inside our Set
+        if (collapsed) {
+          collapsedGroups.add(row.tag);
+        } else {
+          collapsedGroups.delete(row.tag);
+        }
+        
         let sib = headerRow.nextElementSibling;
         while (sib && !sib.classList.contains("mapping-group-header")) {
           sib.style.display = collapsed ? "none" : "";
@@ -2547,6 +2860,9 @@ document.getElementById("mapping-group").addEventListener("change", () => {
 });
 
 document.getElementById("mapping-expand-all").addEventListener("click", () => {
+  // Clear all saved group states so everything opens up
+  collapsedGroups.clear();
+
   document.querySelectorAll("#mapping-tbody .mapping-group-header").forEach((headerRow) => {
     headerRow.classList.remove("collapsed");
 
@@ -2566,6 +2882,11 @@ document.getElementById("mapping-expand-all").addEventListener("click", () => {
 document.getElementById("mapping-collapse-all").addEventListener("click", () => {
   document.querySelectorAll("#mapping-tbody .mapping-group-header").forEach((headerRow) => {
     headerRow.classList.add("collapsed");
+
+    // Save every group's collapsed state to memory
+    if (headerRow.dataset.groupTag) {
+      collapsedGroups.add(headerRow.dataset.groupTag);
+    }
 
     const arrow = headerRow.querySelector(".group-arrow");
     arrow.textContent = "▶";

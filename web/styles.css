@@ -2547,3 +2547,170 @@ select:focus-visible {
 .hierarchy-item.selected > .hierarchy-select {
   background: rgba(74,163,223,.12);
 }
+
+/* ---------- Engineering diagnostics ---------- */
+.diagnostics-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px 6px;
+}
+.diagnostics-summary {
+  margin: 6px 10px 10px;
+  padding: 10px 12px;
+  border: 1px solid #263746;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.diagnostics-summary.diag-ok { border-color: #2d6b4f; }
+.diagnostics-summary.diag-error { border-color: #7a3540; }
+.diagnostic-card {
+  display: block;
+  border-left: 3px solid #52606d;
+  padding: 8px 10px;
+}
+.diagnostic-card.diag-error { border-left-color: #d85b68; }
+.diagnostic-card.diag-warning { border-left-color: #d6a84f; }
+.diagnostic-card.diag-info { border-left-color: #5f9bd3; }
+.diagnostic-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.diagnostic-level {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #25313d;
+}
+.diagnostic-category {
+  font-size: 11px;
+  opacity: .75;
+}
+.diagnostic-message { font-size: 12px; }
+.diagnostic-detail {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  opacity: .7;
+}
+
+/* ---------- Tag Trends ---------- */
+.trend-tag-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 12px;
+  max-height: 180px;
+  overflow: auto;
+}
+.trend-tag-option {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 7px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid #26384b;
+  border-radius: 7px;
+  background: #101b27;
+  cursor: pointer;
+}
+.trend-tag-option small { color: #8493a3; font-size: 11px; }
+.trend-chart-wrap {
+  width: 100%;
+  min-height: 300px;
+  border: 1px solid #26384b;
+  border-radius: 8px;
+  background: #0c1621;
+  overflow: hidden;
+}
+#trend-chart { width: 100%; height: 300px; display: block; }
+.trend-plot-bg { fill: #0e1a27; }
+.trend-grid { stroke: #26384b; stroke-width: 1; }
+.trend-axis { fill: #8493a3; font-size: 10px; }
+.trend-line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.trend-chart-empty { fill: #8493a3; font-size: 13px; }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.trend-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #c7d2df; }
+.trend-legend-item i { width: 10px; height: 3px; display: inline-block; border-radius: 2px; }
+
+#trends-tab.trend-big {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #0b141d;
+  padding: 16px;
+  overflow: auto;
+}
+#trends-tab.trend-big #trend-chart { height: calc(100vh - 260px); }
+#trends-tab.trend-big .trend-chart-wrap { min-height: 0; }
+
+.trend-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.trend-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.trend-select { flex: 1; min-width: 0; }
+.trend-row-remove {
+  background: transparent;
+  border: 1px solid #26384b;
+  border-radius: 6px;
+  color: #c7d2df;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+/* ---------- Production ---------- */
+.production-kpi-grid,
+.production-oee-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 8px 0;
+}
+.production-kpi,
+.production-oee-grid > div {
+  border: 1px solid #26384b;
+  border-radius: 8px;
+  background: #101b27;
+  padding: 9px 10px;
+}
+.production-kpi span,
+.production-oee-grid span {
+  display: block;
+  color: #8493a3;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.production-kpi b,
+.production-oee-grid b {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+.production-config {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #263746;
+}
+.production-config .modal-field {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0;
+}
+.production-config select,
+.production-config input {
+  width: 100%;
+  box-sizing: border-box;
+}

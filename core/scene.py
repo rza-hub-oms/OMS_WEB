@@ -570,6 +570,162 @@ class Scene:
                         errors.append({"index": index, "step": step_index, "error": "Step action destination is not writable."})
         return errors
 
+    def diagnostics(self, plc_validator=None) -> dict:
+        """Run a cross-system engineering health check.
+
+        Diagnostics deliberately sits above the individual validators.  It
+        checks the relationships that can otherwise fail silently between
+        hierarchy, engineering connections, tags, alarms, simulation logic,
+        sequences and PLC mappings.  ``plc_validator`` is an optional
+        callback supplied by the WebSocket/session layer because PLC address
+        syntax depends on the selected backend.
+        """
+        issues = []
+
+        def add(level, category, message, object_tag=None, detail=""):
+            issues.append({
+                "level": level,
+                "category": category,
+                "message": message,
+                "object_tag": object_tag,
+                "detail": detail,
+            })
+
+        # ----- hierarchy -----
+        parent_map = {}
+        for name, obj in self.objects.items():
+            parent = getattr(obj, "parent_tag", None)
+            if parent:
+                parent_map[name] = parent
+                if parent not in self.objects:
+                    add("error", "Hierarchy", "Parent component does not exist.", name,
+                        f"Parent: {parent}")
+
+        for start in self.objects:
+            seen = set()
+            cursor = start
+            while cursor in parent_map:
+                if cursor in seen:
+                    add("error", "Hierarchy", "Circular parent relationship detected.", start)
+                    break
+                seen.add(cursor)
+                cursor = parent_map[cursor]
+
+        # ----- engineering connections -----
+        connection_errors = self.validate_connections()
+        for item in connection_errors:
+            add("error", "Connections", item["error"] + f" (connection {item['index'] + 1}).")
+
+        seen_connections = set()
+        for index, connection in enumerate(self.connections):
+            key = (connection.get("source"), connection.get("target"), connection.get("kind"))
+            if key in seen_connections:
+                add("error", "Connections", "Duplicate engineering connection.",
+                    connection.get("source"), f"Connection {index + 1} duplicates another connection.")
+            seen_connections.add(key)
+            if connection.get("kind") not in {"process", "control", "signal", "mechanical", "safety"}:
+                add("error", "Connections", "Unknown engineering connection type.",
+                    connection.get("source"), f"Type: {connection.get('kind')!r}")
+
+        # ----- central tags -----
+        self.tags.sync()
+        for tag in self.tags.custom.values():
+            if tag.object_tag is not None:
+                obj = self.objects.get(tag.object_tag)
+                if obj is None:
+                    add("error", "Tags", "Internal tag is bound to a missing component.",
+                        tag.name, f"Component: {tag.object_tag}")
+                elif not any(s.name == tag.io_point for s in obj.get_io_signals()):
+                    add("error", "Tags", "Internal tag is bound to a missing I/O point.",
+                        tag.name, f"I/O point: {tag.io_point}")
+            if tag.expression.strip():
+                try:
+                    self.tags.evaluate_expression(tag.expression)
+                except Exception as exc:
+                    add("error", "Tags", "Tag expression cannot be evaluated.",
+                        tag.name, str(exc))
+
+        expression_errors = self.tags.evaluate_expressions()
+        for item in expression_errors:
+            add("error", "Tags", "Derived tag expression has an error.", item.get("name"), item.get("error", ""))
+
+        # ----- alarms -----
+        seen_alarm_ids = set()
+        for index, alarm in enumerate(self.alarm_engine.definitions):
+            alarm_id = alarm.get("id")
+            if alarm_id in seen_alarm_ids:
+                add("error", "Alarms", "Duplicate alarm ID.", alarm_id)
+            seen_alarm_ids.add(alarm_id)
+            expression = str(alarm.get("expression") or "").strip()
+            if not expression:
+                add("warning", "Alarms", "Alarm has no expression and can never become active.", alarm.get("name") or alarm_id)
+                continue
+            try:
+                self.tags.evaluate_expression(expression)
+            except Exception as exc:
+                add("error", "Alarms", "Alarm expression cannot be evaluated.", alarm.get("name") or alarm_id, str(exc))
+
+        # ----- simulation logic / sequences -----
+        for item in self.validate_logic_rules():
+            add("error", "Logic", item["error"], detail=f"Rule {item['index'] + 1}")
+        for item in self.validate_sequences():
+            location = f"Sequence {item['index'] + 1}"
+            if "step" in item:
+                location += f", step {item['step'] + 1}"
+            add("error", "Sequences", item["error"], detail=location)
+
+        # ----- PLC mappings -----
+        if not self.plc_mapping:
+            add("info", "PLC Mapping", "No PLC mappings are configured. This is normal for Simulation-only projects.")
+        seen_mappings = set()
+        for index, mapping in enumerate(self.plc_mapping):
+            tag_name = mapping.get("tag_name") or mapping.get("object_tag")
+            io_point = mapping.get("io_point") or mapping.get("point")
+            plc_node = str(mapping.get("plc_node") or "").strip()
+            key = (tag_name, io_point)
+            if key in seen_mappings:
+                add("error", "PLC Mapping", "Duplicate PLC mapping for the same OMS signal.", tag_name,
+                    f"I/O point: {io_point}")
+            seen_mappings.add(key)
+            if mapping.get("tag_name"):
+                tag = self.tags.get(mapping.get("tag_name"))
+                if tag is None:
+                    add("error", "PLC Mapping", "Mapped OMS tag does not exist.", mapping.get("tag_name"),
+                        f"Mapping {index + 1}")
+            else:
+                obj = self.objects.get(mapping.get("object_tag"))
+                if obj is None:
+                    add("error", "PLC Mapping", "Mapped component does not exist.", mapping.get("object_tag"),
+                        f"Mapping {index + 1}")
+                elif io_point not in obj.get_plc_io_points():
+                    add("error", "PLC Mapping", "Mapped I/O point does not exist on the component.",
+                        mapping.get("object_tag"), f"I/O point: {io_point}")
+            if not plc_node:
+                add("error", "PLC Mapping", "PLC address / node is empty.", tag_name,
+                    f"Mapping {index + 1}")
+
+        if plc_validator is not None and self.plc_mapping:
+            try:
+                for problem in plc_validator() or []:
+                    add("error", "PLC Mapping", problem.get("error", "Invalid PLC address."),
+                        problem.get("object_tag"), f"PLC node: {problem.get('plc_node')}")
+            except Exception as exc:
+                add("error", "PLC Mapping", "PLC mapping validation could not be completed.", detail=str(exc))
+
+        # Stable ordering makes the UI and tests deterministic.
+        level_order = {"error": 0, "warning": 1, "info": 2}
+        issues.sort(key=lambda item: (level_order.get(item["level"], 9), item["category"], item["message"], item.get("object_tag") or ""))
+        counts = {
+            "error": sum(i["level"] == "error" for i in issues),
+            "warning": sum(i["level"] == "warning" for i in issues),
+            "info": sum(i["level"] == "info" for i in issues),
+        }
+        return {
+            "valid": counts["error"] == 0,
+            "counts": counts,
+            "issues": issues,
+        }
+
     def signal_catalog(self) -> list:
         """Return component signals through the central tag registry."""
         self.tags.sync()

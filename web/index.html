@@ -129,6 +129,9 @@
         <button type="button" class="tab" data-tab="tags">Tags</button>
         <button type="button" class="tab" data-tab="alarms">Alarms</button>
         <button type="button" class="tab" data-tab="engineering">Engineering</button>
+        <button type="button" class="tab" data-tab="diagnostics">Diagnostics</button>
+        <button type="button" class="tab" data-tab="trends">Trends</button>
+        <button type="button" class="tab" data-tab="production">Production</button>
         <button type="button" class="tab" data-tab="components">Components</button>
       </div>
 
@@ -246,6 +249,74 @@
         </div>
         <p class="hint">Connections document process, control, signal, mechanical and safety relationships. They are separate from the machine hierarchy.</p>
         <div id="connection-list" class="mapping-card-list"></div>
+      </div>
+      <div id="diagnostics-tab" class="tab-panel" data-panel="diagnostics">
+        <div class="diagnostics-toolbar">
+          <div>
+            <div class="engineering-section-title">Engineering Diagnostics</div>
+            <p class="hint">Checks hierarchy, engineering connections, tags, alarms, simulation logic, sequences and PLC mappings.</p>
+          </div>
+          <button id="diagnostics-run-btn" class="engineering-action" title="Run all diagnostics">Run Diagnostics</button>
+        </div>
+        <div id="diagnostics-summary" class="diagnostics-summary">Run Diagnostics to check this project.</div>
+        <div id="diagnostics-list" class="mapping-card-list"></div>
+      </div>
+      <div id="trends-tab" class="tab-panel" data-panel="trends">
+        <div class="engineering-section-title">Tag Trends</div>
+        <p class="hint">Select numeric OMS tags to record. History is kept for the current session.</p>
+        <label class="modal-field">Sample interval (seconds)
+          <input id="trend-interval" type="number" min="0.05" step="0.05" value="1">
+        </label>
+        <div id="trend-tag-list" class="trend-tag-list"></div>
+        <div id="trend-chart-wrap" class="trend-chart-wrap">
+          <svg id="trend-chart" viewBox="0 0 720 300" role="img" aria-label="Tag trend chart"></svg>
+        </div>
+        <div class="trend-actions">
+          <button id="trends-start-btn" class="engineering-action">▶ Start</button>
+          <button id="trends-pause-btn" class="engineering-action">⏸ Pause</button>
+          <button id="trends-clear-btn" class="engineering-action" title="Clear trend history">Clear</button>
+          <button id="trends-big-btn" class="engineering-action">⛶ Enlarge</button>
+        </div>
+        <div id="trend-legend" class="trend-legend"></div>
+        <p id="trend-empty" class="empty">Select one or more numeric tags to begin recording.</p>
+      </div>
+      <div id="production-tab" class="tab-panel" data-panel="production">
+        <div class="diagnostics-toolbar">
+          <div>
+            <div class="engineering-section-title">Production</div>
+            <p class="hint">Count production from rising-edge OMS tags. Runtime statistics reset when you press Reset.</p>
+          </div>
+          <button id="production-reset-btn" class="engineering-action" title="Reset production counters">Reset</button>
+        </div>
+        <div class="production-kpi-grid">
+          <div class="production-kpi"><span>Total</span><b id="production-total">0</b></div>
+          <div class="production-kpi"><span>Good</span><b id="production-good">0</b></div>
+          <div class="production-kpi"><span>Reject</span><b id="production-reject">0</b></div>
+          <div class="production-kpi"><span>Last Cycle</span><b id="production-cycle">—</b></div>
+        </div>
+        <div class="production-oee-grid">
+          <div><span>Availability</span><b id="production-availability">0.0%</b></div>
+          <div><span>Performance</span><b id="production-performance">0.0%</b></div>
+          <div><span>Quality</span><b id="production-quality">0.0%</b></div>
+          <div><span>OEE</span><b id="production-oee">0.0%</b></div>
+        </div>
+        <div class="production-config">
+          <div class="engineering-section-title">Configuration</div>
+          <label class="modal-field">Production trigger
+            <select id="production-trigger"></select>
+          </label>
+          <label class="modal-field">Reject trigger (optional)
+            <select id="production-reject-trigger"></select>
+          </label>
+          <label class="modal-field">Running tag (optional)
+            <select id="production-running"></select>
+          </label>
+          <label class="modal-field">Ideal cycle time (seconds)
+            <input id="production-ideal-cycle" type="number" min="0" step="0.1" placeholder="0 = OEE performance disabled">
+          </label>
+          <button id="production-apply-btn" class="engineering-action">Apply Configuration</button>
+          <p class="hint">Production trigger and reject trigger count on OFF → ON. Ideal cycle time enables Performance and OEE.</p>
+        </div>
       </div>
       <div id="components-tab" class="tab-panel" data-panel="components">
           <ul id="components-list"></ul>

@@ -186,6 +186,50 @@ class EmergencyStopTagTests(unittest.TestCase):
         self.assertEqual(active[0]["name"], "Emergency Stop")
 
 
+class DiagnosticsTests(unittest.TestCase):
+    def test_clean_scene_diagnostics_has_no_errors(self):
+        scene = Scene()
+        scene.create_component("conveyor", 0, 0)
+        result = scene.diagnostics()
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["counts"]["error"], 0)
+
+    def test_diagnostics_finds_missing_alarm_tag_and_mapping_target(self):
+        scene = Scene()
+        scene.create_component("conveyor", 0, 0)
+        scene.alarm_engine.set_definitions([{
+            "id": "alarm_1",
+            "name": "Bad Alarm",
+            "severity": "critical",
+            "expression": 'tag("Missing.fault")',
+            "enabled": True,
+        }])
+        scene.plc_mapping = [{
+            "object_tag": "Missing",
+            "io_point": "running",
+            "plc_node": "DB1.DBX0.0",
+        }]
+        result = scene.diagnostics()
+        self.assertFalse(result["valid"])
+        messages = [item["message"] for item in result["issues"]]
+        self.assertTrue(any("Alarm expression" in message for message in messages))
+        self.assertTrue(any("Mapped component" in message for message in messages))
+
+    def test_diagnostics_finds_hierarchy_cycle_and_duplicate_connection(self):
+        scene = Scene()
+        a = scene.create_component("conveyor", 0, 0)
+        b = scene.create_component("motor", 100, 0)
+        scene.set_parent(a.tag_name, b.tag_name)
+        # Simulate malformed project data; the public set_parent API blocks this.
+        b.set_parent_tag(a.tag_name)
+        scene.add_connection(a.tag_name, b.tag_name, "control")
+        scene.connections.append({"source": a.tag_name, "target": b.tag_name, "kind": "control", "label": ""})
+        result = scene.diagnostics()
+        self.assertFalse(result["valid"])
+        self.assertTrue(any(item["category"] == "Hierarchy" for item in result["issues"]))
+        self.assertTrue(any("Duplicate engineering connection" in item["message"] for item in result["issues"]))
+
+
 class LogicTests(unittest.TestCase):
     def test_sensor_drives_cylinder_in_simulation(self):
         scene = Scene()

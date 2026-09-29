@@ -92,3 +92,22 @@
 - Clarified that engineering connections are separate from hierarchy.
 - Replaced ambiguous `+` / `✓` connection controls with `+ Connection` / `✓ Validate`.
 - Added hierarchy regression tests for parent assignment, root moves, and cycle prevention.
+
+## v10.2 — Engineering diagnostics
+
+- Added a cross-system Diagnostics inspector panel.
+- Diagnostics validate machine hierarchy, engineering connections, central tags, alarms, simulation logic, sequences and PLC mappings.
+- Added severity levels (error, warning, info) with deterministic issue ordering and a project-valid summary.
+- Added regression coverage for clean projects, missing alarm/mapping references, hierarchy cycles and duplicate engineering connections.
+
+## v10.3 — Tag Trends
+- Added a bounded in-memory trend recorder sampling selected numeric OMS tags once per second.
+- Added Inspector → Trends with numeric tag selection, live history chart and Clear action.
+- Trend data uses the central OMS Tag Registry and is available in Design, Simulation and Runtime sessions.
+- Boolean tags are intentionally excluded from numeric plots; alarm/event history remains the appropriate representation for discrete states.
+
+## v11 — Production Information
+- Added central-tag-driven production counters and OEE foundation.
+- Added Production inspector panel with trigger configuration, reset, cycle time and KPI display.
+- Production configuration is saved in `.oms` projects.
+- Project format advanced to version 11.

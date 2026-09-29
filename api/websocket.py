@@ -194,6 +194,7 @@ async def websocket_endpoint(ws: WebSocket):
                     if requested_mode == "simulation" and session.mode != "simulation":
                         session.scene.logic_engine.reset()
                         session.scene.sequence_engine.reset()
+                    session.trend_recorder.running = False
                     session.mode = requested_mode
                     continue
                 elif action == "set_point":
@@ -202,6 +203,24 @@ async def websocket_endpoint(ws: WebSocket):
                         command["point"],
                         command["value"],
                     )
+                elif action == "set_trend_tags":
+                    session.trend_recorder.configure(command.get("tags", []))
+                elif action == "clear_trends":
+                    session.trend_recorder.clear()
+                elif action == "set_trend_running":
+                    if session.mode == "design":
+                        continue
+                    session.trend_recorder.running = bool(command.get("running", True))
+                elif action == "set_trend_interval":
+                    try:
+                        session.trend_recorder.set_interval(command.get("interval_s", 1.0))
+                    except (TypeError, ValueError):
+                        pass
+                elif action == "set_production_config":
+                    if session.mode == "design":
+                        session.production_tracker.configure(command.get("config", {}))
+                elif action == "reset_production":
+                    session.production_tracker.reset()
                 elif action == "set_tag":
                     # Central tags are the common data contract. Runtime/PLC
                     # writes may update writable tags; design-only creation
@@ -312,6 +331,12 @@ async def websocket_endpoint(ws: WebSocket):
                 elif action == "validate_connections":
                     await ws.send_text(json.dumps({
                         "connection_validation": session.scene.validate_connections(),
+                    }))
+                elif action == "run_diagnostics":
+                    await ws.send_text(json.dumps({
+                        "diagnostics": session.scene.diagnostics(
+                            plc_validator=lambda: _validate_mappings(session)
+                        ),
                     }))
                 elif action == "plc_connect":
                     await _plc_connect(session, command["backend"], command.get("params", {}))
@@ -441,6 +466,8 @@ async def websocket_endpoint(ws: WebSocket):
                     session.project.name = info["name"]
                     session.project.metadata = info["metadata"]
                     session.project.version = info["version"]
+                    session.production_tracker.configure(command.get("data", {}).get("production", {}))
+                    session.trend_recorder.clear()
                 elif action == "restore_objects":
                     # Undo/Redo: replaces component placement/state only --
                     # PLC mapping and connection settings are untouched.
@@ -463,6 +490,7 @@ async def websocket_endpoint(ws: WebSocket):
                             session.scene,
                             name=session.project.name,
                             metadata=session.project.metadata,
+                            production=session.production_tracker.config.to_dict(),
                         ),
                     }))
                 else:
@@ -629,6 +657,13 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
         )
             if session.plc_sync is not None and session.mode == "runtime":
                 session.plc_sync.poll()
+            if session.mode in ("simulation", "runtime"):
+                session.trend_recorder.sample(session.scene.tags.read, dt_seconds)
+            session.production_tracker.tick(
+                session.scene.tags.read,
+                dt_seconds,
+                active=(session.mode != "design"),
+            )
             await manager.broadcast(
                 ws,
                 {
@@ -641,6 +676,8 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
                     "alarms": session.scene.alarm_snapshot(),
                     "hierarchy": session.scene.hierarchy(),
                     "connections": list(session.scene.connections),
+                    "trends": session.trend_recorder.snapshot(),
+                    "production": session.production_tracker.snapshot(),
                     "project": {
                         "name": session.project.name,
                         "version": session.project.version,

@@ -100,3 +100,10 @@ Components can belong to a machine hierarchy through a `parent_tag`. Engineering
 ### Engineering hierarchy editor
 
 In Design mode, open **Inspector → Engineering → Machine Hierarchy**. Drag a component onto another component to make it a child. Drag a component to **Drop here to move to Root**, or select it and use **Move to Root**. The **Connections** section below is separate and is used for process/control/signal/mechanical/safety relationships.
+
+### Engineering diagnostics
+
+Open **Inspector → Diagnostics** and select **Run Diagnostics**. The diagnostic pass checks hierarchy references/cycles, engineering connections, central tag bindings and expressions, alarm expressions, simulation logic, sequences, and PLC mappings. Issues are reported as errors, warnings, or informational messages; a project with no errors is shown as valid.
+
+### Trends
+The Inspector **Trends** tab can record selected numeric OMS tags at 1-second intervals. History is kept for the current browser session with a bounded 3,600-sample buffer (about one hour per selected tag). The trend recorder reads through the same central tag registry used by simulation, alarms and PLC integration.

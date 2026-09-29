@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from core.scene import Scene
+from core.trends import TrendRecorder
+from core.production import ProductionTracker
 
 
 @dataclass
 class Project:
     scene: Scene = field(default_factory=Scene)
     name: str = "Untitled"
-    version: int = 10
+    version: int = 11
     metadata: dict = field(default_factory=dict)
 
     def reset(self) -> None:
@@ -29,6 +31,8 @@ class ProjectSession:
     plc_sync: object | None = None
     selected_plc_backend: str | None = None
     last_connect_error: str | None = None
+    trend_recorder: TrendRecorder = field(default_factory=TrendRecorder)
+    production_tracker: ProductionTracker = field(default_factory=ProductionTracker)
 
     @property
     def scene(self) -> Scene:
