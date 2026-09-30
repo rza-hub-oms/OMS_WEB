@@ -63,6 +63,7 @@
       <button type="button" id="design-mode-btn" class="mode-btn active">Design</button>
       <button type="button" id="simulation-mode-btn" class="mode-btn">Simulation</button>
       <button type="button" id="runtime-mode-btn" class="mode-btn">Runtime</button>
+      <button type="button" id="dashboard-btn" class="mode-btn dashboard-toolbar-btn">Dashboard</button>
     </div>
 
     <div class="toolbar-divider"></div>
@@ -93,6 +94,51 @@
 
   <div id="runtime-alarm-bar" class="hidden">
     ⚠ RUNTIME — PLC connection lost. Values shown are the last known state.
+  </div>
+
+  <div id="dashboard-overlay" class="dashboard-overlay hidden" aria-hidden="true">
+    <div class="dashboard-shell">
+      <div class="dashboard-header">
+        <div>
+          <div class="dashboard-title">OMS DASHBOARD</div>
+          <div class="dashboard-subtitle"><span id="dashboard-mode">Design</span> · <span id="dashboard-project">Untitled</span></div>
+        </div>
+        <div class="dashboard-header-actions">
+          <span id="dashboard-clock" class="dashboard-clock">--:--:--</span>
+          <button type="button" id="dashboard-close-btn" class="dashboard-close">Close</button>
+        </div>
+      </div>
+      <div class="dashboard-kpis">
+        <div class="dashboard-kpi"><span>Production</span><b id="dash-total">0</b><small>Total</small></div>
+        <div class="dashboard-kpi"><span>Good</span><b id="dash-good">0</b><small>Good parts</small></div>
+        <div class="dashboard-kpi"><span>Reject</span><b id="dash-reject">0</b><small>Rejects</small></div>
+        <div class="dashboard-kpi"><span>OEE</span><b id="dash-oee">0.0%</b><small>Overall equipment effectiveness</small></div>
+      </div>
+      <div class="dashboard-grid">
+        <section class="dashboard-card dashboard-machine-card">
+          <div class="dashboard-card-title">MACHINE STATUS <span id="dash-machine-summary"></span></div>
+          <div id="dashboard-machines" class="dashboard-machine-list"></div>
+        </section>
+        <section class="dashboard-card dashboard-alarm-card">
+          <div class="dashboard-card-title">ACTIVE ALARMS <span id="dash-alarm-count" class="dashboard-count">0</span></div>
+          <div id="dashboard-alarms" class="dashboard-alarm-list"></div>
+        </section>
+        <section class="dashboard-card">
+          <div class="dashboard-card-title">PRODUCTION</div>
+          <div class="dashboard-metric-list">
+            <div><span>Availability</span><b id="dash-availability">0.0%</b></div>
+            <div><span>Performance</span><b id="dash-performance">0.0%</b></div>
+            <div><span>Quality</span><b id="dash-quality">0.0%</b></div>
+            <div><span>Last Cycle</span><b id="dash-cycle">—</b></div>
+          </div>
+        </section>
+        <section class="dashboard-card">
+          <div class="dashboard-card-title">PLC CONNECTION</div>
+          <div id="dashboard-plc-status" class="dashboard-plc-status">Not connected</div>
+          <div class="dashboard-plc-detail" id="dashboard-plc-detail">Simulation values are local.</div>
+        </section>
+      </div>
+    </div>
   </div>
 
   <div id="app">
@@ -473,6 +519,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=13"></script>
+  <script type="module" src="app.js?v=15"></script>
 </body>
 </html>

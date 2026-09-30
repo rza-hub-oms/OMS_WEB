@@ -2714,3 +2714,66 @@ select:focus-visible {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ---------- Operator Dashboard (separate from Inspector) ---------- */
+.dashboard-toolbar-btn { font-weight: 700; }
+.dashboard-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(5, 10, 15, .94);
+  padding: 18px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+.dashboard-overlay.hidden { display: none; }
+.dashboard-shell { max-width: 1400px; margin: 0 auto; min-height: calc(100vh - 36px); }
+.dashboard-header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:4px 0 18px; }
+.dashboard-title { font-size:22px; font-weight:800; letter-spacing:.08em; }
+.dashboard-subtitle { color:#8493a3; font-size:12px; margin-top:4px; }
+.dashboard-header-actions { display:flex; align-items:center; gap:12px; }
+.dashboard-clock { color:#c7d2df; font-variant-numeric:tabular-nums; }
+.dashboard-close { border:1px solid #34485c; background:#101b27; color:#dce6ef; border-radius:7px; padding:8px 14px; cursor:pointer; }
+.dashboard-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
+.dashboard-kpi, .dashboard-card { border:1px solid #26384b; border-radius:10px; background:#0e1924; box-shadow:0 8px 24px rgba(0,0,0,.16); }
+.dashboard-kpi { padding:15px; }
+.dashboard-kpi span { color:#8493a3; text-transform:uppercase; font-size:10px; letter-spacing:.08em; }
+.dashboard-kpi b { display:block; font-size:30px; margin:7px 0 2px; }
+.dashboard-kpi small { color:#8493a3; font-size:10px; }
+.dashboard-grid { display:grid; grid-template-columns:1.35fr 1fr; gap:12px; }
+.dashboard-card { padding:14px; min-height:170px; }
+.dashboard-card-title { display:flex; justify-content:space-between; align-items:center; color:#c7d2df; font-size:11px; font-weight:700; letter-spacing:.07em; margin-bottom:12px; }
+.dashboard-count { background:#26384b; border-radius:999px; padding:2px 8px; }
+.dashboard-machine-list, .dashboard-alarm-list { display:flex; flex-direction:column; gap:7px; }
+.dashboard-machine-row, .dashboard-alarm-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px; border:1px solid #223344; border-radius:7px; background:#101b27; }
+.dashboard-machine-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dashboard-status { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700; white-space:nowrap; }
+.dashboard-status i { width:7px; height:7px; border-radius:50%; background:#718096; display:inline-block; }
+.dashboard-status.running i, .dashboard-status.active i { background:#55d17a; }
+.dashboard-status.fault i { background:#ef6b6b; }
+.dashboard-status.stopped i { background:#718096; }
+.dashboard-alarm-row { justify-content:flex-start; }
+.dashboard-alarm-row small { margin-left:auto; color:#8493a3; }
+.dashboard-alarm-severity { font-size:9px; font-weight:800; min-width:55px; }
+.dashboard-alarm-row.critical { border-color:#6e3030; }
+.dashboard-alarm-row.critical .dashboard-alarm-severity { color:#ff7474; }
+.dashboard-alarm-row.warning { border-color:#65522a; }
+.dashboard-alarm-row.warning .dashboard-alarm-severity { color:#e9bd54; }
+.dashboard-alarm-row.info .dashboard-alarm-severity { color:#6ea8ff; }
+.dashboard-metric-list { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+.dashboard-metric-list div { border:1px solid #223344; border-radius:7px; padding:10px; background:#101b27; }
+.dashboard-metric-list span { display:block; color:#8493a3; font-size:10px; }
+.dashboard-metric-list b { display:block; margin-top:5px; font-size:18px; }
+.dashboard-plc-status { font-size:18px; font-weight:800; padding:14px; border-radius:8px; background:#101b27; border:1px solid #26384b; }
+.dashboard-plc-status.connected { border-color:#2c6342; }
+.dashboard-plc-status.fault { border-color:#6e3030; color:#ff7474; }
+.dashboard-plc-detail { color:#8493a3; font-size:11px; margin-top:10px; }
+.dashboard-empty { color:#8493a3; padding:18px 8px; text-align:center; }
+@media (max-width: 900px) {
+  .dashboard-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .dashboard-grid { grid-template-columns:1fr; }
+}
+@media (max-width: 520px) {
+  .dashboard-kpis { grid-template-columns:1fr 1fr; }
+  .dashboard-overlay { padding:10px; }
+}

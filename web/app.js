@@ -68,6 +68,13 @@ const runtimeModeBtn = document.getElementById("runtime-mode-btn");
 const modeDescription = document.getElementById("mode-description");
 const runtimeAlarmBar = document.getElementById("runtime-alarm-bar");
 
+// Small DOM helper shared by the dashboard and other UI renderers.
+// Keep this at module scope so every renderer can use it.
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
 let panning = false;
 let selectionMarquee = null;
 let marqueeStartX = 0;
@@ -194,8 +201,8 @@ simulationModeBtn?.addEventListener("click", () => {
 });
 
 runtimeModeBtn.addEventListener("click", () => {
-  if (!latestPlc.connected) {
-    alert("Connect to a PLC before switching to Runtime.");
+  if (!latestPlc.connected || latestPlc.comms_healthy === false) {
+    alert("Connect to a PLC and wait for healthy communication before switching to Runtime.");
     return;
   }
 
@@ -655,6 +662,27 @@ setMessageHandler((event) => {
     return;
   }
 
+  if (msg.project_loaded !== undefined) {
+    // Project loading replaces the component tree and therefore the
+    // component-backed system tags.  Refresh all dependent UI state
+    // immediately instead of waiting for the next periodic broadcast.
+    const loaded = msg.project_loaded || {};
+    if (loaded.tags) {
+      latestTags = loaded.tags;
+      renderTags();
+    }
+    if (loaded.plc) {
+      latestPlc = loaded.plc;
+      mappingRowsKey = null;
+      renderPlcStatus(latestPlc);
+      renderMappingTable(latestPlc, latestState);
+      renderPlcMonitor(latestPlc, latestState);
+    } else {
+      mappingRowsKey = null;
+    }
+    return;
+  }
+
   if (msg.project_data !== undefined) {
     saveProjectData(msg.project_data);
     return;
@@ -723,6 +751,7 @@ setMessageHandler((event) => {
     renderProduction();
   }
   render(latestState);
+  renderDashboard();
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
   renderPlcMonitor(latestPlc, latestState);
@@ -1381,6 +1410,82 @@ function sendDeleteComponent(tagName) {
   });
 }
 
+// ---------- Operator dashboard ----------
+let dashboardOpen = false;
+function setDashboardOpen(open) {
+  dashboardOpen = !!open;
+  const overlay = document.getElementById("dashboard-overlay");
+  if (!overlay) return;
+  overlay.classList.toggle("hidden", !dashboardOpen);
+  overlay.setAttribute("aria-hidden", dashboardOpen ? "false" : "true");
+  if (dashboardOpen) renderDashboard();
+}
+
+function dashboardMachineStatus(obj) {
+  const fault = !!(obj.fault || obj.emergency_stop || obj.error);
+  if (fault) return ["FAULT", "fault"];
+  if (obj.type === "conveyor" || obj.type === "motor") return obj.running ? ["RUNNING", "running"] : ["STOPPED", "stopped"];
+  if (obj.type === "cylinder") {
+    if (obj.moving) return ["MOVING", "running"];
+    if (obj.fault) return ["FAULT", "fault"];
+    return ["READY", "stopped"];
+  }
+  if (obj.type === "sensor") return obj.detected ? ["ACTIVE", "active"] : ["READY", "stopped"];
+  if (obj.type === "emergency_push_button") return obj.pressed ? ["PRESSED", "fault"] : ["READY", "stopped"];
+  if (obj.type === "push_button" || obj.type === "toggle_switch") return obj.pressed || obj.value ? ["ON", "active"] : ["OFF", "stopped"];
+  return ["READY", "stopped"];
+}
+
+function renderDashboard() {
+  const overlay = document.getElementById("dashboard-overlay");
+  if (!overlay) return;
+  setText("dashboard-mode", omsMode.charAt(0).toUpperCase() + omsMode.slice(1));
+  setText("dashboard-project", currentProjectFilename || "Untitled");
+  setText("dashboard-clock", new Date().toLocaleTimeString());
+
+  const p = latestProduction || {};
+  setText("dash-total", p.total_count ?? 0);
+  setText("dash-good", p.good_count ?? 0);
+  setText("dash-reject", p.reject_count ?? 0);
+  setText("dash-oee", `${((p.oee || 0) * 100).toFixed(1)}%`);
+  setText("dash-availability", `${((p.availability || 0) * 100).toFixed(1)}%`);
+  setText("dash-performance", `${((p.performance || 0) * 100).toFixed(1)}%`);
+  setText("dash-quality", `${((p.quality || 0) * 100).toFixed(1)}%`);
+  setText("dash-cycle", Number.isFinite(p.cycle_time_s) ? `${p.cycle_time_s.toFixed(1)} s` : "—");
+
+  const machines = Object.entries(latestState || {}).filter(([, o]) => ["conveyor", "motor", "cylinder"].includes(o.type));
+  const faultCount = machines.filter(([, o]) => dashboardMachineStatus(o)[1] === "fault").length;
+  const runningCount = machines.filter(([, o]) => dashboardMachineStatus(o)[1] === "running").length;
+  setText("dash-machine-summary", `${runningCount} running · ${faultCount} fault`);
+  const machineEl = document.getElementById("dashboard-machines");
+  if (machineEl) {
+    machineEl.innerHTML = machines.length ? machines.map(([name, obj]) => {
+      const [label, cls] = dashboardMachineStatus(obj);
+      return `<div class="dashboard-machine-row"><span class="dashboard-machine-name">${escapeHtml(name)}</span><span class="dashboard-status ${cls}"><i></i>${label}</span></div>`;
+    }).join("") : '<div class="dashboard-empty">No machine equipment configured.</div>';
+  }
+
+  const active = latestAlarms?.active || [];
+  setText("dash-alarm-count", active.length);
+  const alarmEl = document.getElementById("dashboard-alarms");
+  if (alarmEl) alarmEl.innerHTML = active.length ? active.slice(0, 8).map(a =>
+    `<div class="dashboard-alarm-row ${escapeHtml(a.severity || "warning")}"><span class="dashboard-alarm-severity">${escapeHtml((a.severity || "warning").toUpperCase())}</span><span>${escapeHtml(a.name || a.id)}</span><small>${a.acknowledged ? "ACK" : "ACTIVE"}</small></div>`
+  ).join("") : '<div class="dashboard-empty">No active alarms.</div>';
+
+  const plc = latestPlc || {};
+  const plcStatus = document.getElementById("dashboard-plc-status");
+  if (plcStatus) {
+    plcStatus.className = `dashboard-plc-status ${plc.connected ? (plc.comms_healthy === false ? "fault" : "connected") : ""}`;
+    plcStatus.textContent = plc.connected ? (plc.comms_healthy === false ? "CONNECTED — COMMS LOST" : `CONNECTED — ${String(plc.backend || "PLC").toUpperCase()}`) : "NOT CONNECTED";
+  }
+  setText("dashboard-plc-detail", plc.connected ? (plc.paused ? "PLC communication is paused." : "Live PLC values are available.") : "Simulation values are local.");
+}
+
+document.getElementById("dashboard-btn")?.addEventListener("click", () => setDashboardOpen(true));
+document.getElementById("dashboard-close-btn")?.addEventListener("click", () => setDashboardOpen(false));
+document.getElementById("dashboard-overlay")?.addEventListener("click", e => { if (e.target.id === "dashboard-overlay") setDashboardOpen(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && dashboardOpen) setDashboardOpen(false); });
+
 // ---------- Rendering ----------
 
 function render(state) {
@@ -1870,7 +1975,6 @@ function renderProduction() {
     if (document.activeElement !== ideal) ideal.value = idealKey;
   }
 
-  const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
   setText("production-total", latestProduction.total_count ?? 0);
   setText("production-good", latestProduction.good_count ?? 0);
   setText("production-reject", latestProduction.reject_count ?? 0);
@@ -2430,12 +2534,22 @@ function renderPlcStatus(plc) {
   pauseBtn.disabled = !plc.connected;
   pauseBtn.textContent = plc.paused ? "Resume" : "Pause";
 
-  // Runtime requires a live PLC -- reflect that on the mode button
-  // itself, not just as an alert when clicked.
-  runtimeModeBtn.classList.toggle("unavailable", !plc.connected);
-  runtimeModeBtn.title = plc.connected
+  // Runtime requires a healthy live PLC. Keep the button genuinely
+  // disabled when there is no connection (or communication has been
+  // lost), so the UI cannot suggest that Runtime is available.
+  const runtimeAvailable = !!plc.connected && plc.comms_healthy !== false;
+  runtimeModeBtn.disabled = !runtimeAvailable;
+  runtimeModeBtn.classList.toggle("unavailable", !runtimeAvailable);
+  runtimeModeBtn.title = runtimeAvailable
     ? ""
-    : "Connect to a PLC before switching to Runtime.";
+    : "Connect to a PLC and wait for healthy communication before switching to Runtime.";
+
+  // A PLC loss while already in Runtime is a safety boundary: leave
+  // Runtime immediately instead of keeping a stale live-operation mode.
+  if (isRuntimeMode() && !runtimeAvailable) {
+    omsMode = "design";
+    updateModeUI();
+  }
 
   document.getElementById("plc-last-error").textContent = plc.last_error || "";
 
@@ -2616,9 +2730,14 @@ function mappingIdentity(row) {
 
 function allMappingRows() {
   const rows = [];
+  const knownKeys = new Set();
+
+  // Build the normal catalog rows first.
+  // Keep a key set because a saved project may contain a valid PLC mapping
+  // before the browser has received the refreshed component-tag catalog.
   for (const tag of latestTags) {
     if (tag.system) {
-      rows.push({
+      const row = {
         tag: tag.name,
         point: tag.io_point || "value",
         object_tag: tag.object_tag,
@@ -2628,9 +2747,11 @@ function allMappingRows() {
         datatype: tag.datatype,
         source: `${tag.object_tag}.${tag.io_point}`,
         internal: false,
-      });
+      };
+      rows.push(row);
+      knownKeys.add(`${row.object_tag}|${row.io_point}`);
     } else {
-      rows.push({
+      const row = {
         tag: tag.name,
         point: tag.object_tag && tag.io_point ? `${tag.object_tag}.${tag.io_point}` : "Internal",
         object_tag: tag.object_tag || null,
@@ -2640,10 +2761,41 @@ function allMappingRows() {
         datatype: tag.datatype,
         source: tag.object_tag && tag.io_point ? `Connected to ${tag.object_tag}.${tag.io_point}` : "Internal tag",
         internal: true,
-      });
+      };
+      rows.push(row);
+      knownKeys.add(row.tag_name ? `tag:${row.tag_name}` : `${row.object_tag}|${row.io_point}`);
     }
   }
-  return rows.sort((a, b) => `${a.tag}.${a.point}`.localeCompare(`${b.tag}.${b.point}`));
+
+  // IMPORTANT: the saved project mapping is authoritative for the Mapping
+  // panel. If the component tag catalog is temporarily stale (for example
+  // during project-load WebSocket message ordering), still render every
+  // saved object/io mapping. This prevents sensor mappings from disappearing
+  // even though they are present in the .oms file and in plc.mapping.
+  for (const m of (latestPlc?.mapping || [])) {
+    if (!m.object_tag || !m.io_point) continue;
+    const key = `${m.object_tag}|${m.io_point}`;
+    if (knownKeys.has(key)) continue;
+
+    const signal = (latestPlc?.signals || []).find(s =>
+      s.object_tag === m.object_tag && s.io_point === m.io_point
+    );
+    rows.push({
+      tag: `${m.object_tag}.${m.io_point}`,
+      point: m.io_point,
+      object_tag: m.object_tag,
+      io_point: m.io_point,
+      tag_name: null,
+      isPlcToOms: signal ? signal.direction === "PLC -> OMS" : true,
+      datatype: signal?.datatype || "any",
+      source: `${m.object_tag}.${m.io_point}`,
+      internal: false,
+    });
+    knownKeys.add(key);
+  }
+
+  const g = r => r.object_tag || r.tag;
+  return rows.sort((a, b) => `${g(a)}|${a.tag}.${a.point}`.localeCompare(`${g(b)}|${b.tag}.${b.point}`));
 }
 
 function renderMappingTable(plc, state) {
@@ -2685,19 +2837,21 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
   let lastTag = null;
 
   for (const row of rows) {
-    if (grouping && row.tag !== lastTag) {
+    const groupKey = row.object_tag || groupKey;
+
+    if (grouping && groupKey !== lastTag) {
       const headerRow = document.createElement("div");
       headerRow.className = "mapping-group-header";
-      headerRow.dataset.groupTag = row.tag;
+      headerRow.dataset.groupTag = groupKey;
       
       // Check if this group was previously collapsed
-      const isCollapsed = collapsedGroups.has(row.tag);
+      const isCollapsed = collapsedGroups.has(groupKey);
       if (isCollapsed) {
         headerRow.classList.add("collapsed");
       }
       
       // Render the correct arrow indicator based on status
-      headerRow.innerHTML = `<span class="group-arrow">${isCollapsed ? "▶" : "▼"}</span><span class="group-header-label">${escapeHtml(row.tag)}</span>`;
+      headerRow.innerHTML = `<span class="group-arrow">${isCollapsed ? "▶" : "▼"}</span><span class="group-header-label">${escapeHtml(groupKey)}</span>`;
       
       headerRow.addEventListener("click", () => {
         const collapsed = headerRow.classList.toggle("collapsed");
@@ -2705,9 +2859,9 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
         
         // Track the persistence state inside our Set
         if (collapsed) {
-          collapsedGroups.add(row.tag);
+          collapsedGroups.add(groupKey);
         } else {
-          collapsedGroups.delete(row.tag);
+          collapsedGroups.delete(groupKey);
         }
         
         let sib = headerRow.nextElementSibling;
@@ -2718,7 +2872,7 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
         applyMappingFilter();
       });
       tbody.appendChild(headerRow);
-      lastTag = row.tag;
+      lastTag = groupKey;
     }
 
     const key = mappingIdentity(row);
@@ -2728,9 +2882,9 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
       : (row.isPlcToOms ? "PLC → OMS" : "OMS → PLC");
     const tr = document.createElement("div");
     tr.className = "mapping-card";
-    tr.dataset.groupTag = row.tag;
+    tr.dataset.groupTag = groupKey;
     tr.classList.toggle("unmapped-row", !nodeValue);
-    const objectLabel = row.object_tag || row.tag;
+    const objectLabel = row.object_tag || groupKey;
     const pointLabel = row.point.startsWith(`${objectLabel}.`) ? row.point.slice(objectLabel.length + 1) : row.point;
     tr.innerHTML = `
       <div class="mapping-card-top" title="${escapeHtml(row.source)}">
@@ -2757,7 +2911,7 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
       const applyForce = () => {
         const value = forceInput.value.trim();
         if (!value) return;
-        if (row.internal) send({ action: "plc_force_tag", name: row.tag, value });
+        if (row.internal) send({ action: "plc_force_tag", name: groupKey, value });
         else send({ action: "plc_force", tag_name: row.object_tag, io_point: row.io_point, value });
       };
       forceInput.addEventListener("keydown", e => { if (e.key === "Enter") applyForce(); });

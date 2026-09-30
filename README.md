@@ -107,3 +107,10 @@ Open **Inspector → Diagnostics** and select **Run Diagnostics**. The diagnosti
 
 ### Trends
 The Inspector **Trends** tab can record selected numeric OMS tags at 1-second intervals. History is kept for the current browser session with a bounded 3,600-sample buffer (about one hour per selected tag). The trend recorder reads through the same central tag registry used by simulation, alarms and PLC integration.
+
+### Operator Dashboard
+The main toolbar now includes **Dashboard**. It opens a separate operator-oriented overview without adding another Inspector tab. It shows production KPIs, machine status, active alarms, and PLC connection status using the existing OMS state.
+
+
+### v11.4
+PLC Mapping now refreshes its component-backed system tag catalog immediately after opening a `.oms` project, including sensor tags.

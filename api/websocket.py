@@ -178,13 +178,15 @@ async def websocket_endpoint(ws: WebSocket):
                         continue
 
                     if requested_mode == "runtime" and not (
-                        session.plc_sync is not None and session.plc_sync.is_connected
+                        session.plc_sync is not None
+                        and session.plc_sync.is_connected
+                        and session.plc_sync._comms_healthy
                     ):
                         # RUNTIME means "connected to the actual PLC" --
                         # refuse to enter it without a live connection
                         # instead of silently showing frozen/fake values.
                         await ws.send_text(json.dumps({
-                            "mode_error": "Connect to a PLC before switching to Runtime.",
+                            "mode_error": "Connect to a PLC and wait for healthy communication before switching to Runtime.",
                         }))
                         continue
 
@@ -468,6 +470,21 @@ async def websocket_endpoint(ws: WebSocket):
                     session.project.version = info["version"]
                     session.production_tracker.configure(command.get("data", {}).get("production", {}))
                     session.trend_recorder.clear()
+                    # A project load replaces the scene in one operation.
+                    # Push the freshly rebuilt tag catalog immediately so the
+                    # browser does not have to wait for (or race with) the
+                    # next periodic state broadcast.  This is especially
+                    # important for component-backed system tags such as
+                    # Sensor_Box.detected and Sensor_WorkPos.detected.
+                    session.scene.tags.sync()
+                    await ws.send_text(json.dumps({
+                        "project_loaded": {
+                            "name": session.project.name,
+                            "version": session.project.version,
+                            "tags": session.scene.tag_catalog(),
+                            "plc": _plc_status(session),
+                        }
+                    }))
                 elif action == "restore_objects":
                     # Undo/Redo: replaces component placement/state only --
                     # PLC mapping and connection settings are untouched.
@@ -657,6 +674,10 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
         )
             if session.plc_sync is not None and session.mode == "runtime":
                 session.plc_sync.poll()
+                if (not session.plc_sync.is_connected) or (not session.plc_sync._comms_healthy):
+                    session.mode = "design"
+                    session.scene.stop_all_actuators()
+                    session.trend_recorder.running = False
             if session.mode in ("simulation", "runtime"):
                 session.trend_recorder.sample(session.scene.tags.read, dt_seconds)
             session.production_tracker.tick(

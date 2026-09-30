@@ -1,3 +1,10 @@
+
+## v11.4 — Project-load PLC Mapping refresh
+- Fixed PLC Mapping not immediately showing component/system tags after opening a `.oms` project.
+- Project loading now sends an immediate refreshed tag catalog and PLC mapping snapshot.
+- Frontend resets the mapping table cache and rebuilds it from the freshly loaded project state.
+- Sensor tags such as `Sensor_Box.detected`, `Sensor_HomePos.detected`, and `Sensor_WorkPos.detected` are now refreshed immediately after project load.
+- No Inspector tabs added.
 # OMS Web – Architecture Update
 
 ## v9 — Alarm System
@@ -111,3 +118,15 @@
 - Added Production inspector panel with trigger configuration, reset, cycle time and KPI display.
 - Production configuration is saved in `.oms` projects.
 - Project format advanced to version 11.
+
+## v11.1 Dashboard
+- Added a separate operator Dashboard overlay accessible from the main toolbar.
+- Kept the Inspector tab set unchanged.
+- Dashboard combines production KPIs, machine status, active alarms, and PLC status.
+- Dashboard uses existing WebSocket state; no duplicate data model was introduced.
+
+## v11.5 — PLC Mapping saved-project fallback
+- Fixed PLC Mapping rows disappearing when the component tag catalog arrives stale or out of order during project load.
+- PLC Mapping now uses the saved `plc.mapping` entries as an authoritative fallback and can render mapped component I/O directly from the backend signal catalog.
+- Sensor mappings such as `Sensor_Box.detected`, `Sensor_HomePos.detected`, and `Sensor_WorkPos.detected` remain visible even if the tag catalog refresh is delayed.
+- No Inspector tabs added.
