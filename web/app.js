@@ -39,22 +39,67 @@ let trendChartRenderKey = "";
 let currentProjectFilename = null;
 
 let projectDirty = false;
+const RECOVERY_KEY = "oms.recovery.v1";
+let recoveryBackupTimer = null;
+
+function writeRecoveryBackup(data) {
+  if (!data) return;
+  try {
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+      saved_at: new Date().toISOString(),
+      filename: currentProjectFilename || "recovery",
+      data,
+    }));
+    updateRecoveryUI();
+  } catch (err) {
+    console.warn("OMS recovery backup unavailable:", err);
+  }
+}
+
+function requestRecoveryBackup() {
+  if (!projectDirty) return;
+  send({ action: "project_snapshot" });
+}
+
+function scheduleRecoveryBackup() {
+  if (recoveryBackupTimer) clearTimeout(recoveryBackupTimer);
+  recoveryBackupTimer = setTimeout(requestRecoveryBackup, 1500);
+}
+
+function readRecoveryBackup() {
+  try { return JSON.parse(localStorage.getItem(RECOVERY_KEY) || "null"); }
+  catch (_) { return null; }
+}
+
+function updateRecoveryUI() {
+  const btn = document.getElementById("recover-project-btn");
+  if (!btn) return;
+  const backup = readRecoveryBackup();
+  btn.disabled = !backup?.data;
+  btn.title = backup?.saved_at
+    ? `Recover backup from ${new Date(backup.saved_at).toLocaleString()}`
+    : "No recovery backup available";
+}
 
 function markDirty() {
-  if (projectDirty) return;
-  projectDirty = true;
-  updateDirtyUI();
+  if (!projectDirty) {
+    projectDirty = true;
+    updateDirtyUI();
+  }
+  scheduleRecoveryBackup();
 }
 
 function markClean() {
   if (!projectDirty) return;
   projectDirty = false;
+  if (recoveryBackupTimer) { clearTimeout(recoveryBackupTimer); recoveryBackupTimer = null; }
   updateDirtyUI();
 }
 
 function updateDirtyUI() {
   document.getElementById("dirty-indicator").classList.toggle("hidden", !projectDirty);
   document.title = (projectDirty ? "* " : "") + "OMS Web Prototype";
+  updateRecoveryUI();
 }
 
 function updateFileNameUI() {
@@ -662,6 +707,12 @@ setMessageHandler((event) => {
     return;
   }
 
+  if (msg.project_load_error !== undefined) {
+    const errors = msg.project_load_error || [];
+    alert("Cannot open project:\n\n" + errors.map(e => `${e.field}: ${e.error}`).join("\n"));
+    return;
+  }
+
   if (msg.project_loaded !== undefined) {
     // Project loading replaces the component tree and therefore the
     // component-backed system tags.  Refresh all dependent UI state
@@ -685,6 +736,11 @@ setMessageHandler((event) => {
 
   if (msg.project_data !== undefined) {
     saveProjectData(msg.project_data);
+    return;
+  }
+
+  if (msg.project_snapshot !== undefined) {
+    if (projectDirty) writeRecoveryBackup(msg.project_snapshot);
     return;
   }
 
@@ -752,6 +808,7 @@ setMessageHandler((event) => {
   }
   render(latestState);
   renderDashboard();
+  if (reportsOpen) renderReports();
   renderPlcStatus(latestPlc);
   renderMappingTable(latestPlc, latestState);
   renderPlcMonitor(latestPlc, latestState);
@@ -1278,6 +1335,7 @@ function sendAddComponent(componentType, x, y) {
 }
 
 let currentFileHandle = null;
+let lastSavedProjectData = null;
 const supportsFileSystemAccess = "showSaveFilePicker" in window;
 
 async function pickSaveHandle(suggestedName) {
@@ -1292,6 +1350,7 @@ async function pickSaveHandle(suggestedName) {
 }
 
 async function saveProjectData(data) {
+  lastSavedProjectData = data;
   if (supportsFileSystemAccess && currentFileHandle) {
     const writable = await currentFileHandle.createWritable();
     await writable.write(JSON.stringify(data, null, 2));
@@ -1360,6 +1419,39 @@ async function performSave() {
 }
 
 document.getElementById("save-project-btn").addEventListener("click", performSave);
+
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    performSave();
+  }
+});
+
+window.addEventListener("beforeunload", e => {
+  if (!projectDirty) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+document.getElementById("recover-project-btn")?.addEventListener("click", async () => {
+  const backup = readRecoveryBackup();
+  if (!backup?.data) return;
+  const stamp = backup.saved_at ? new Date(backup.saved_at).toLocaleString() : "unknown time";
+  if (!confirm(`Recover the automatic OMS backup from ${stamp}?\n\nThe recovered project will become the current project and should be saved afterward.`)) return;
+  if (projectDirty && !(await (async () => {
+    const saveFirst = confirm("Current project has unsaved changes. OK = save it first. Cancel = recover without saving.");
+    if (saveFirst) await performSave();
+    return true;
+  })())) return;
+  const data = backup.data;
+  currentProjectFilename = `${backup.filename || "recovered"}_recovered`.replace(/\.oms$/i, "");
+  currentFileHandle = null;
+  updateFileNameUI();
+  markClean();
+  deselectAll();
+  applyLoadedConnectionSettings(data.plc_connection);
+  send({ action: "load_project", data });
+});
 
 document.getElementById("open-project-input").addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -1452,6 +1544,8 @@ function renderDashboard() {
   setText("dash-performance", `${((p.performance || 0) * 100).toFixed(1)}%`);
   setText("dash-quality", `${((p.quality || 0) * 100).toFixed(1)}%`);
   setText("dash-cycle", Number.isFinite(p.cycle_time_s) ? `${p.cycle_time_s.toFixed(1)} s` : "—");
+  setText("dash-shift-name", p.shift?.name || "Shift 1");
+  setText("dash-shift-elapsed", formatDuration(p.shift?.elapsed_seconds));
 
   const machines = Object.entries(latestState || {}).filter(([, o]) => ["conveyor", "motor", "cylinder"].includes(o.type));
   const faultCount = machines.filter(([, o]) => dashboardMachineStatus(o)[1] === "fault").length;
@@ -1485,6 +1579,101 @@ document.getElementById("dashboard-btn")?.addEventListener("click", () => setDas
 document.getElementById("dashboard-close-btn")?.addEventListener("click", () => setDashboardOpen(false));
 document.getElementById("dashboard-overlay")?.addEventListener("click", e => { if (e.target.id === "dashboard-overlay") setDashboardOpen(false); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && dashboardOpen) setDashboardOpen(false); });
+
+// ---------- Operational reports ----------
+let reportsOpen = false;
+function setReportsOpen(open) {
+  reportsOpen = !!open;
+  const overlay = document.getElementById("reports-overlay");
+  if (!overlay) return;
+  overlay.classList.toggle("hidden", !reportsOpen);
+  overlay.setAttribute("aria-hidden", reportsOpen ? "false" : "true");
+  if (reportsOpen) renderReports();
+}
+
+function reportTime(value) {
+  if (!value) return "—";
+  const d = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function renderReports() {
+  const p = latestProduction || {};
+  setText("reports-project", currentProjectFilename || "Untitled");
+  setText("reports-shift-name", p.shift?.name || "Shift 1");
+  setText("reports-shift-start", reportTime(p.shift?.started_at));
+  setText("reports-shift-elapsed", formatDuration(p.shift?.elapsed_seconds));
+  const prod = document.getElementById("reports-production");
+  if (prod) {
+    const metrics = [
+      ["Total", p.total_count ?? 0],
+      ["Good", p.good_count ?? 0],
+      ["Reject", p.reject_count ?? 0],
+      ["OEE", `${((p.oee || 0) * 100).toFixed(1)}%`],
+      ["Availability", `${((p.availability || 0) * 100).toFixed(1)}%`],
+      ["Performance", `${((p.performance || 0) * 100).toFixed(1)}%`],
+      ["Quality", `${((p.quality || 0) * 100).toFixed(1)}%`],
+      ["Avg Cycle", Number.isFinite(p.average_cycle_s) ? `${p.average_cycle_s.toFixed(1)} s` : "—"],
+    ];
+    prod.innerHTML = metrics.map(([label, value]) => `<div class="report-metric"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join("");
+  }
+
+  const alarmHistory = latestAlarms?.history || [];
+  setText("reports-alarm-count", alarmHistory.length);
+  const alarmEl = document.getElementById("reports-alarms");
+  if (alarmEl) {
+    alarmEl.innerHTML = alarmHistory.length ? `<table class="reports-table"><thead><tr><th>Time</th><th>Severity</th><th>Alarm</th><th>Event</th></tr></thead><tbody>${alarmHistory.slice(0, 150).map(a => `<tr><td>${escapeHtml(reportTime(a.timestamp))}</td><td>${escapeHtml((a.severity || "warning").toUpperCase())}</td><td>${escapeHtml(a.name || a.id || "")}</td><td>${escapeHtml(a.event || "")}</td></tr>`).join("")}</tbody></table>` : '<div class="reports-empty">No alarm history in this session.</div>';
+  }
+
+  const plcEvents = latestPlc?.event_log || [];
+  const plcEl = document.getElementById("reports-plc-events");
+  if (plcEl) {
+    plcEl.innerHTML = plcEvents.length ? `<table class="reports-table"><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead><tbody>${plcEvents.slice(-100).reverse().map(e => `<tr><td>${escapeHtml(reportTime(e.timestamp || e.time))}</td><td>${escapeHtml(e.event || e.type || "PLC")}</td><td>${escapeHtml(e.message || e.detail || e.error || "")}</td></tr>`).join("")}</tbody></table>` : '<div class="reports-empty">No PLC events recorded.</div>';
+  }
+
+  const samples = latestTrends?.samples || [];
+  const trendEl = document.getElementById("reports-trends");
+  if (trendEl) {
+    const names = latestTrends?.selected || [];
+    trendEl.innerHTML = samples.length ? `<table class="reports-table"><thead><tr><th>Time</th>${names.map(n => `<th>${escapeHtml(n)}</th>`).join("")}</tr></thead><tbody>${samples.slice(-100).reverse().map(sample => `<tr><td>${escapeHtml(reportTime(sample.timestamp))}</td>${names.map(n => `<td>${sample.values?.[n] == null ? "—" : escapeHtml(Number(sample.values[n]).toFixed(3))}</td>`).join("")}</tr>`).join("")}</tbody></table>` : '<div class="reports-empty">No trend samples recorded. Start a trend in Simulation or Runtime to collect samples.</div>';
+  }
+}
+
+function exportReportsCsv() {
+  const rows = [["REPORT", currentProjectFilename || "Untitled"], ["SHIFT", latestProduction?.shift?.name || "Shift 1"], ["SHIFT START", reportTime(latestProduction?.shift?.started_at)], [], ["PRODUCTION", "VALUE"],
+    ["Total", latestProduction?.total_count ?? 0], ["Good", latestProduction?.good_count ?? 0], ["Reject", latestProduction?.reject_count ?? 0],
+    ["OEE", ((latestProduction?.oee || 0) * 100).toFixed(1) + "%"], ["Availability", ((latestProduction?.availability || 0) * 100).toFixed(1) + "%"],
+    ["Performance", ((latestProduction?.performance || 0) * 100).toFixed(1) + "%"], ["Quality", ((latestProduction?.quality || 0) * 100).toFixed(1) + "%"], [],
+    ["ALARM HISTORY", "", "", ""], ["Time", "Severity", "Alarm", "Event"],
+    ...(latestAlarms?.history || []).map(a => [reportTime(a.timestamp), a.severity || "", a.name || a.id || "", a.event || ""]), [],
+    ["PLC EVENTS", "", ""], ["Time", "Event", "Detail"],
+    ...(latestPlc?.event_log || []).map(e => [reportTime(e.timestamp || e.time), e.event || e.type || "PLC", e.message || e.detail || e.error || ""]), []];
+  const csv = rows.map(row => row.map(v => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `OMS_Report_${new Date().toISOString().replaceAll(':','-').slice(0,19)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+document.getElementById("reports-btn")?.addEventListener("click", () => setReportsOpen(true));
+document.getElementById("reports-close-btn")?.addEventListener("click", () => setReportsOpen(false));
+document.getElementById("reports-export-btn")?.addEventListener("click", exportReportsCsv);
+document.getElementById("reports-new-shift-btn")?.addEventListener("click", () => {
+  const name = prompt("New shift name:", latestProduction?.shift?.name || "Shift 1");
+  if (name === null) return;
+  send({ action: "start_new_shift", name: name.trim() || "Shift 1" });
+});
+document.getElementById("reports-overlay")?.addEventListener("click", e => { if (e.target.id === "reports-overlay") setReportsOpen(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && reportsOpen) setReportsOpen(false); });
 
 // ---------- Rendering ----------
 
@@ -2802,12 +2991,13 @@ function renderMappingTable(plc, state) {
   const tbody = document.getElementById("mapping-tbody");
   const grouping = document.getElementById("mapping-group").checked;
   const rows = allMappingRows();
-  // Include the saved mapping list (PLC node addresses) in the fingerprint,
-  // not just the tag/row set -- otherwise, when a project loads and the
-  // addresses arrive in a later message than the (unchanged) tag list, the
-  // key never changes and buildMappingRows() never reruns, leaving the
-  // table showing empty addresses even though plc.mapping is now correct.
-  const key = grouping + "|" + rows.map(mappingIdentity).join(",") + "|" + JSON.stringify(plc.mapping || []);
+  // Fingerprint uses only static fields (identity + PLC node address).
+  // Do NOT stringify plc.mapping: it contains live_value, which changes
+  // with every tag update and would force a full rebuild (blinking list).
+  const mapKey = (plc.mapping || [])
+    .map(m => mappingEntryKey(m) + "=" + (m.plc_node || ""))
+    .join(",");
+  const key = grouping + "|" + rows.map(mappingIdentity).join(",") + "|" + mapKey;
   if (key !== mappingRowsKey) {
     mappingRowsKey = key;
     buildMappingRows(tbody, rows, plc.mapping || [], grouping);
@@ -2837,7 +3027,7 @@ function buildMappingRows(tbody, rows, mappingList, grouping) {
   let lastTag = null;
 
   for (const row of rows) {
-    const groupKey = row.object_tag || groupKey;
+    const groupKey = row.object_tag || row.tag;
 
     if (grouping && groupKey !== lastTag) {
       const headerRow = document.createElement("div");
@@ -3676,3 +3866,4 @@ window.addEventListener("beforeunload", (e) => {
   e.preventDefault();
   e.returnValue = "";
 });
+updateRecoveryUI();

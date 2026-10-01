@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.scene import COMPONENT_REGISTRY
 
-PROJECT_VERSION = 11
+PROJECT_VERSION = 12
 
 _SETTER_OVERRIDES = {
     "rotation": "rotation_value",
@@ -15,6 +15,43 @@ _SETTER_OVERRIDES = {
     # projects still have the old key; route it to the new setter.
     "target_conveyor": "target_tag",
 }
+
+
+def validate_project_dict(data: dict) -> list[dict]:
+    """Return user-facing validation errors for an .oms project payload."""
+    errors = []
+    if not isinstance(data, dict):
+        return [{"field": "root", "error": "Project must be a JSON object."}]
+    version = data.get("version", 1)
+    try:
+        version_num = int(version)
+    except (TypeError, ValueError):
+        errors.append({"field": "version", "error": "Project version must be an integer."})
+        version_num = PROJECT_VERSION
+    if version_num > PROJECT_VERSION:
+        errors.append({"field": "version", "error": f"Project version {version_num} is newer than this OMS version {PROJECT_VERSION}."})
+    objects = data.get("objects", [])
+    if not isinstance(objects, list):
+        errors.append({"field": "objects", "error": "Objects must be a list."})
+    else:
+        for i, obj in enumerate(objects):
+            if not isinstance(obj, dict):
+                errors.append({"field": f"objects[{i}]", "error": "Object must be an object."})
+                continue
+            if not obj.get("type"):
+                errors.append({"field": f"objects[{i}].type", "error": "Missing component type."})
+            if not obj.get("tag_name"):
+                errors.append({"field": f"objects[{i}].tag_name", "error": "Missing tag name."})
+    for field in ("plc_mapping", "logic_rules", "sequences", "alarms", "connections"):
+        if field in data and not isinstance(data[field], list):
+            errors.append({"field": field, "error": f"{field} must be a list."})
+    if "tags" in data and not isinstance(data["tags"], list):
+        errors.append({"field": "tags", "error": "tags must be a list."})
+    if "plc_connection" in data and not isinstance(data["plc_connection"], dict):
+        errors.append({"field": "plc_connection", "error": "PLC connection settings must be an object."})
+    if "production" in data and not isinstance(data["production"], dict):
+        errors.append({"field": "production", "error": "Production settings must be an object."})
+    return errors
 
 
 def migrate_project_dict(data: dict) -> dict:
@@ -75,6 +112,9 @@ def scene_to_project_dict(scene, *, name="Untitled", metadata=None, production=N
 
 def load_project_dict(scene, data: dict) -> dict:
     """Replace scene contents and return normalized project metadata."""
+    errors = validate_project_dict(data)
+    if errors:
+        raise ValueError("Invalid OMS project: " + "; ".join(e["error"] for e in errors))
     payload = migrate_project_dict(data)
     scene.objects.clear()
     scene._cylinder_previously_extended.clear()

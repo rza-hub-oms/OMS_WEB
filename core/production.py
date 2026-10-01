@@ -18,6 +18,7 @@ class ProductionConfig:
     reject_trigger: str = ""
     running_tag: str = ""
     ideal_cycle_s: float = 0.0
+    shift_name: str = "Shift 1"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -37,6 +38,7 @@ class ProductionTracker:
         self._previous_reject = False
         self._cycle_samples: list[float] = []
         self.started_at = time()
+        self.shift_started_at = self.started_at
 
     def configure(self, config: dict | ProductionConfig | None) -> None:
         if isinstance(config, ProductionConfig):
@@ -52,6 +54,7 @@ class ProductionTracker:
                 reject_trigger=str(data.get("reject_trigger", "") or "").strip(),
                 running_tag=str(data.get("running_tag", "") or "").strip(),
                 ideal_cycle_s=ideal,
+                shift_name=str(data.get("shift_name", "Shift 1") or "Shift 1").strip() or "Shift 1",
             )
         self.reset()
 
@@ -67,6 +70,14 @@ class ProductionTracker:
         self._previous_reject = False
         self._cycle_samples = []
         self.started_at = time()
+        self.shift_started_at = self.started_at
+
+    def start_new_shift(self, name: str | None = None) -> None:
+        if name is not None:
+            cleaned = str(name).strip()
+            if cleaned:
+                self.config.shift_name = cleaned
+        self.reset()
 
     @staticmethod
     def _rising(value: Any, previous: bool) -> tuple[bool, bool]:
@@ -148,4 +159,9 @@ class ProductionTracker:
             "quality": quality,
             "oee": oee,
             "configured": bool(self.config.production_trigger),
+            "shift": {
+                "name": self.config.shift_name,
+                "started_at": self.shift_started_at,
+                "elapsed_seconds": max(0.0, time() - self.shift_started_at),
+            },
         }

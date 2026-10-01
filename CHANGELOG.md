@@ -1,3 +1,19 @@
+## v11.8 — Project Save/Load Hardening
+
+- Added project schema validation before loading.
+- Rejects unsupported future project versions and malformed project structures without replacing the current scene.
+- Added load error reporting in the web UI.
+- Added Ctrl/Cmd+S shortcut and browser unsaved-change warning.
+- Project version advanced to 12; older projects continue to migrate.
+
+## v11.7 — Shift Production
+
+- Added current shift information to Dashboard and Reports without adding an Inspector tab.
+- Added shift name, start time and elapsed time to production snapshots.
+- Added New Shift operator action to reset production counters and start a new shift.
+- Shift name is preserved in project production configuration.
+- Reports CSV now includes shift information.
+
 
 ## v11.4 — Project-load PLC Mapping refresh
 - Fixed PLC Mapping not immediately showing component/system tags after opening a `.oms` project.
@@ -130,3 +146,17 @@
 - PLC Mapping now uses the saved `plc.mapping` entries as an authoritative fallback and can render mapped component I/O directly from the backend signal catalog.
 - Sensor mappings such as `Sensor_Box.detected`, `Sensor_HomePos.detected`, and `Sensor_WorkPos.detected` remain visible even if the tag catalog refresh is delayed.
 - No Inspector tabs added.
+
+## v11.6
+- Added Reports as a separate operator/engineering overlay; no Inspector tab added.
+- Added session operational history view for production KPIs, alarm history, PLC events, and recent trend samples.
+- Added CSV export for production, alarm, and PLC operational data.
+- Reports update live while open and reuse existing OMS state/history sources.
+- Browser asset cache version bumped to app.js?v=16.
+
+
+## v11.9
+- Added automatic browser-local recovery backups for dirty projects.
+- Added Recover action to restore the latest automatic backup after an unexpected browser/app close.
+- Added backend project snapshot endpoint used by recovery without changing Save behavior.
+- Recovery backup is refreshed shortly after project edits and is cleared from active dirty state after a normal save.

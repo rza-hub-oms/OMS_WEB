@@ -223,6 +223,10 @@ async def websocket_endpoint(ws: WebSocket):
                         session.production_tracker.configure(command.get("config", {}))
                 elif action == "reset_production":
                     session.production_tracker.reset()
+                elif action == "start_new_shift":
+                    if session.mode not in ("simulation", "runtime"):
+                        continue
+                    session.production_tracker.start_new_shift(command.get("name"))
                 elif action == "set_tag":
                     # Central tags are the common data contract. Runtime/PLC
                     # writes may update writable tags; design-only creation
@@ -463,8 +467,13 @@ async def websocket_endpoint(ws: WebSocket):
                 elif action == "load_project":
                     if session.mode != "design":
                         continue
-                    from project.serialization import load_project_dict
-                    info = load_project_dict(session.scene, command.get("data", {}))
+                    from project.serialization import load_project_dict, validate_project_dict
+                    project_data = command.get("data", {})
+                    validation_errors = validate_project_dict(project_data)
+                    if validation_errors:
+                        await ws.send_text(json.dumps({"project_load_error": validation_errors}))
+                        continue
+                    info = load_project_dict(session.scene, project_data)
                     session.project.name = info["name"]
                     session.project.metadata = info["metadata"]
                     session.project.version = info["version"]
@@ -499,6 +508,16 @@ async def websocket_endpoint(ws: WebSocket):
                 elif action == "plc_validate":
                     await ws.send_text(json.dumps({
                         "plc_validation": _validate_mappings(session),
+                    }))
+                elif action == "project_snapshot":
+                    from project.serialization import scene_to_project_dict
+                    await ws.send_text(json.dumps({
+                        "project_snapshot": scene_to_project_dict(
+                            session.scene,
+                            name=session.project.name,
+                            metadata=session.project.metadata,
+                            production=session.production_tracker.config.to_dict(),
+                        ),
                     }))
                 elif action == "save_project":
                     from project.serialization import scene_to_project_dict

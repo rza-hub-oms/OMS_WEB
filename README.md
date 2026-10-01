@@ -114,3 +114,16 @@ The main toolbar now includes **Dashboard**. It opens a separate operator-orient
 
 ### v11.4
 PLC Mapping now refreshes its component-backed system tag catalog immediately after opening a `.oms` project, including sensor tags.
+
+### v11.6 Reports
+The main toolbar now includes **Reports**. It opens a separate operational-history screen without adding another Inspector tab. Reports shows the current session's production summary, alarm history, PLC events, and recent trend samples, with CSV export for production/alarm/PLC data.
+
+### v11.7 Shift Production
+The operator Dashboard and Reports now show the current shift name, start time and elapsed time. Reports provides a **New Shift** action to reset production counters and begin a new shift while in Simulation or Runtime.
+
+### Project Save/Load hardening (v11.8)
+Project loading now validates the project before replacing the current scene. Unsupported future versions and malformed project structures are rejected with a clear error. Ctrl/Cmd+S and unsaved-change protection are also supported.
+
+
+### Project recovery (v11.9)
+OMS keeps a recent recovery snapshot in the browser's local storage while a project has unsaved changes. Use **Recover** in the File toolbar after an unexpected close. After recovery, save the project normally. Recovery does not add an Inspector tab.

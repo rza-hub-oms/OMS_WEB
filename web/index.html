@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>OMS Web Prototype</title>
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=12" />
 </head>
 <body>
   <h1>OMS Web Prototype</h1>
@@ -64,6 +64,7 @@
       <button type="button" id="simulation-mode-btn" class="mode-btn">Simulation</button>
       <button type="button" id="runtime-mode-btn" class="mode-btn">Runtime</button>
       <button type="button" id="dashboard-btn" class="mode-btn dashboard-toolbar-btn">Dashboard</button>
+      <button type="button" id="reports-btn" class="mode-btn dashboard-toolbar-btn">Reports</button>
     </div>
 
     <div class="toolbar-divider"></div>
@@ -124,8 +125,10 @@
           <div id="dashboard-alarms" class="dashboard-alarm-list"></div>
         </section>
         <section class="dashboard-card">
-          <div class="dashboard-card-title">PRODUCTION</div>
+          <div class="dashboard-card-title">SHIFT / PRODUCTION</div>
           <div class="dashboard-metric-list">
+            <div><span>Shift</span><b id="dash-shift-name">Shift 1</b></div>
+            <div><span>Shift Elapsed</span><b id="dash-shift-elapsed">0:00:00</b></div>
             <div><span>Availability</span><b id="dash-availability">0.0%</b></div>
             <div><span>Performance</span><b id="dash-performance">0.0%</b></div>
             <div><span>Quality</span><b id="dash-quality">0.0%</b></div>
@@ -137,6 +140,37 @@
           <div id="dashboard-plc-status" class="dashboard-plc-status">Not connected</div>
           <div class="dashboard-plc-detail" id="dashboard-plc-detail">Simulation values are local.</div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="reports-overlay" class="dashboard-overlay hidden" aria-hidden="true">
+    <div class="dashboard-shell reports-shell">
+      <div class="dashboard-header">
+        <div>
+          <div class="dashboard-title">OMS REPORTS</div>
+          <div class="dashboard-subtitle"><span id="reports-project">Untitled</span> · Session operational history</div>
+        </div>
+        <div class="dashboard-header-actions">
+          <button type="button" id="reports-export-btn" class="dashboard-close">Export CSV</button>
+          <button type="button" id="reports-close-btn" class="dashboard-close">Close</button>
+        </div>
+      </div>
+      <div class="reports-summary">
+        <div class="dashboard-card">
+          <div class="dashboard-card-title">CURRENT SHIFT <button type="button" id="reports-new-shift-btn" class="dashboard-close">New Shift</button></div>
+          <div class="shift-panel">
+            <div><span>Shift</span><b id="reports-shift-name">Shift 1</b></div>
+            <div><span>Started</span><b id="reports-shift-start">—</b></div>
+            <div><span>Elapsed</span><b id="reports-shift-elapsed">0:00:00</b></div>
+          </div>
+        </div>
+        <div class="dashboard-card"><div class="dashboard-card-title">PRODUCTION SUMMARY</div><div id="reports-production" class="reports-metrics"></div></div>
+        <div class="dashboard-card"><div class="dashboard-card-title">PLC EVENTS</div><div id="reports-plc-events" class="reports-table-wrap"></div></div>
+      </div>
+      <div class="reports-grid">
+        <section class="dashboard-card"><div class="dashboard-card-title">ALARM HISTORY <span id="reports-alarm-count" class="dashboard-count">0</span></div><div id="reports-alarms" class="reports-table-wrap"></div></section>
+        <section class="dashboard-card"><div class="dashboard-card-title">RECENT TREND SAMPLES</div><div id="reports-trends" class="reports-table-wrap"></div></section>
       </div>
     </div>
   </div>
@@ -519,6 +553,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=15"></script>
+  <script type="module" src="app.js?v=16"></script>
 </body>
 </html>
