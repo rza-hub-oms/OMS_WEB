@@ -37,6 +37,30 @@ let trendBackendKey = null;
 let trendChartRenderKey = "";
 
 let currentProjectFilename = null;
+let latestProjectMetadata = {};
+let lastServerMetadata = null;
+
+// ---------- Operator screen state (must exist before initial UI render) ----------
+const BUILTIN_OPERATOR_SCREENS = {
+  machine: { title: "Machine", description: "Live machine canvas. In Runtime this is the primary operator view." },
+  dashboard: { title: "Dashboard", description: "Production KPIs, machine status, active alarms and PLC state." },
+  alarms: { title: "Alarms", description: "Existing OMS alarm panel with active alarms, history and acknowledgement." },
+  trends: { title: "Trends", description: "Existing OMS trend recorder and live trend data." },
+  production: { title: "Production", description: "Existing production counters, OEE and shift information." },
+  diagnostics: { title: "Diagnostics", description: "Existing PLC and machine diagnostics tools." },
+  reports: { title: "Reports", description: "Operational history, production summary and CSV export." },
+};
+const SCREEN_MODULES = [
+  ["machine", "Machine"], ["dashboard", "Dashboard"], ["alarms", "Alarms"],
+  ["trends", "Trends"], ["production", "Production"], ["diagnostics", "Diagnostics"], ["reports", "Reports"],
+];
+let screensOpen = false;
+let activeOperatorScreen = "machine";
+let customOperatorScreens = [];
+let customScreenEditorOpen = false;
+let activeCustomScreenId = null;
+let widgetEditMode = false;
+let selectedWidgetId = null;
 
 let projectDirty = false;
 const RECOVERY_KEY = "oms.recovery.v1";
@@ -209,6 +233,9 @@ function updateModeUI() {
 
   document.body.classList.remove("mode-design", "mode-simulation", "mode-runtime");
   document.body.classList.add(`mode-${omsMode}`);
+  document.body.classList.remove("panel-fullscreen");
+  activeOperatorScreen = "machine";
+  applyCustomScreenMode();
 
   // Components palette is a DESIGN-only operation.
   palette.style.pointerEvents = design ? "auto" : "none";
@@ -219,6 +246,7 @@ function updateModeUI() {
   updateUndoRedoButtons();
 
   updateRuntimeAlarmBar();
+  updateOperatorScreenBar();
 
   // Re-render inspector because properties become read-only
   // outside of Design mode.
@@ -718,6 +746,7 @@ setMessageHandler((event) => {
     // component-backed system tags.  Refresh all dependent UI state
     // immediately instead of waiting for the next periodic broadcast.
     const loaded = msg.project_loaded || {};
+    if (loaded.metadata) { latestProjectMetadata = loaded.metadata || {}; loadOperatorScreensFromMetadata(latestProjectMetadata); renderRuntimeScreenBar(); }
     if (loaded.tags) {
       latestTags = loaded.tags;
       renderTags();
@@ -732,6 +761,15 @@ setMessageHandler((event) => {
       mappingRowsKey = null;
     }
     return;
+  }
+
+  if (msg.project !== undefined) {
+    const project = msg.project || {};
+    if (project.metadata && JSON.stringify(project.metadata) !== JSON.stringify(lastServerMetadata)) {
+      lastServerMetadata = project.metadata;
+      latestProjectMetadata = project.metadata; loadOperatorScreensFromMetadata(latestProjectMetadata); renderRuntimeScreenBar();
+    }
+    if (project.name) { currentProjectFilename = project.name; updateFileNameUI(); }
   }
 
   if (msg.project_data !== undefined) {
@@ -769,6 +807,7 @@ setMessageHandler((event) => {
   if (msg.plc?.tags && JSON.stringify(msg.plc.tags) !== JSON.stringify(latestTags)) {
     latestTags = msg.plc.tags;
     renderTags();
+    updateCustomWidgetValues();
   }
   if (msg.logic_rules && JSON.stringify(msg.logic_rules) !== JSON.stringify(latestLogicRules)) {
     latestLogicRules = msg.logic_rules;
@@ -785,6 +824,8 @@ setMessageHandler((event) => {
   if (msg.alarms && JSON.stringify(msg.alarms) !== JSON.stringify(latestAlarms)) {
     latestAlarms = msg.alarms;
     renderAlarms();
+    updateAlarmBadge();
+    updateCustomWidgetValues();
   }
   if (msg.hierarchy) {
     const key = JSON.stringify(msg.hierarchy) + "|" + omsMode + "|" + [...selectedTags].join(",");
@@ -1375,7 +1416,7 @@ function downloadProjectBlob(data) {
 }
 
 function requestProjectSave() {
-  send({ action: "save_project" });
+  send({ action: "save_project", metadata: latestProjectMetadata || {} });
 }
 
 function saveProjectAsClassic() {
@@ -1574,6 +1615,434 @@ function renderDashboard() {
   }
   setText("dashboard-plc-detail", plc.connected ? (plc.paused ? "PLC communication is paused." : "Live PLC values are available.") : "Simulation values are local.");
 }
+
+// ---------- Operator screens ----------
+function loadOperatorScreensFromMetadata(metadata) {
+  const raw = metadata?.operator_screens;
+  customOperatorScreens = Array.isArray(raw) ? raw.filter(s => s && s.id && s.title).map(s => ({
+    id: String(s.id), title: String(s.title), description: String(s.description || "Custom operator screen"),
+    modules: Array.isArray(s.modules) ? s.modules.filter(m => BUILTIN_OPERATOR_SCREENS[m]) : ["machine"],
+    widgets: sanitizeWidgets(s.widgets),
+  })) : [];
+  if (customOperatorScreens.some(s => s.id === activeOperatorScreen) || BUILTIN_OPERATOR_SCREENS[activeOperatorScreen]) return;
+  activeOperatorScreen = "machine";
+}
+function allOperatorScreens() {
+  const custom = Object.fromEntries(customOperatorScreens.map(s => [s.id, s]));
+  return { ...BUILTIN_OPERATOR_SCREENS, ...custom };
+}
+function persistOperatorScreens() {
+  latestProjectMetadata = { ...(latestProjectMetadata || {}), operator_screens: customOperatorScreens };
+  markDirty();
+}
+function renderOperatorScreenCards() {
+  const el = document.getElementById("operator-screen-grid");
+  if (!el) return;
+  const screens = allOperatorScreens();
+  const cards = Object.entries(screens).map(([id, screen]) => `
+    <div class="operator-screen-card-wrap">
+      <button type="button" class="operator-screen-card ${activeOperatorScreen === id ? "active" : ""}" data-open-operator-screen="${escapeHtml(id)}">
+        <span class="operator-screen-card-title">${escapeHtml(screen.title)}</span>
+        <span class="operator-screen-card-description">${escapeHtml(screen.description)}</span>
+        <span class="operator-screen-card-open">Open →</span>
+      </button>
+      ${id.startsWith("custom_") ? `<button type="button" class="operator-screen-delete" data-delete-operator-screen="${escapeHtml(id)}">Delete</button>` : ""}
+    </div>`).join("");
+  el.innerHTML = cards + `<button type="button" class="operator-screen-card operator-screen-add" id="add-operator-screen-btn"><span class="operator-screen-card-title">＋ New Screen</span><span class="operator-screen-card-description">Create a project-specific operator screen from existing OMS views.</span><span class="operator-screen-card-open">Configure →</span></button>`;
+  el.querySelectorAll("[data-open-operator-screen]").forEach(btn => btn.addEventListener("click", () => openOperatorScreen(btn.dataset.openOperatorScreen)));
+  el.querySelectorAll("[data-delete-operator-screen]").forEach(btn => btn.addEventListener("click", () => deleteCustomOperatorScreen(btn.dataset.deleteOperatorScreen)));
+  document.getElementById("add-operator-screen-btn")?.addEventListener("click", () => setCustomScreenEditorOpen(true));
+}
+function setScreensOpen(open) {
+  screensOpen = !!open;
+  const overlay = document.getElementById("screens-overlay");
+  if (!overlay) return;
+  overlay.classList.toggle("hidden", !screensOpen);
+  overlay.setAttribute("aria-hidden", screensOpen ? "false" : "true");
+  if (screensOpen) renderOperatorScreenCards();
+}
+function setCustomScreenEditorOpen(open) {
+  customScreenEditorOpen = !!open;
+  const el = document.getElementById("operator-screen-editor");
+  if (!el) return;
+  el.classList.toggle("hidden", !customScreenEditorOpen);
+  if (customScreenEditorOpen) {
+    document.getElementById("custom-screen-title").value = "";
+    document.getElementById("custom-screen-description").value = "";
+    document.querySelectorAll("[data-screen-module]").forEach((c, i) => c.checked = i === 0);
+  }
+}
+function createCustomOperatorScreen() {
+  const title = document.getElementById("custom-screen-title")?.value.trim();
+  if (!title) { alert("Please enter a screen name."); return; }
+  const modules = [...document.querySelectorAll("[data-screen-module]:checked")].map(c => c.dataset.screenModule);
+  const id = `custom_${Date.now()}`;
+  customOperatorScreens.push({ id, title, description: document.getElementById("custom-screen-description")?.value.trim() || "Custom operator screen", modules, widgets: [] });
+  persistOperatorScreens();
+  setCustomScreenEditorOpen(false);
+  renderOperatorScreenCards();
+  openOperatorScreen(id);
+}
+function deleteCustomOperatorScreen(id) {
+  const screen = customOperatorScreens.find(s => s.id === id);
+  if (!screen || !confirm(`Delete operator screen "${screen.title}"?`)) return;
+  customOperatorScreens = customOperatorScreens.filter(s => s.id !== id);
+  if (activeOperatorScreen === id) activeOperatorScreen = "machine";
+  persistOperatorScreens();
+  renderOperatorScreenCards();
+  renderRuntimeScreenBar();
+}
+function selectInspectorTab(tabName) {
+  const btn = document.querySelector(`.tabs .tab[data-tab="${tabName}"]`);
+  if (!btn) return false;
+  btn.click();
+  return true;
+}
+function setPanelFullscreen(on) { document.body.classList.toggle("panel-fullscreen", !!on); }
+function closeOperatorOverlays() {
+  setScreensOpen(false); setDashboardOpen(false); setReportsOpen(false); closeCustomRuntimeScreen(); setPanelFullscreen(false);
+}
+document.getElementById("panel-fullscreen-close")?.addEventListener("click", () => openOperatorScreen("machine"));
+document.addEventListener("keydown", e => { if (e.key === "Escape" && document.body.classList.contains("panel-fullscreen")) openOperatorScreen("machine"); });
+function openOperatorScreen(screenId) {
+  const screens = allOperatorScreens();
+  if (!screens[screenId]) return;
+  activeOperatorScreen = screenId;
+  document.querySelectorAll(".runtime-screen-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.operatorScreen === screenId));
+  closeOperatorOverlays();
+  if (BUILTIN_OPERATOR_SCREENS[screenId]) {
+    if (screenId === "machine") return;
+    if (screenId === "dashboard") { setDashboardOpen(true); return; }
+    if (screenId === "reports") { setReportsOpen(true); return; }
+    if (selectInspectorTab(screenId)) setPanelFullscreen(true); return;
+  }
+  const custom = customOperatorScreens.find(s => s.id === screenId);
+  if (custom) openCustomOperatorScreen(custom);
+}
+function openCustomOperatorScreen(screen) {
+  const overlay = document.getElementById("custom-runtime-overlay");
+  const title = document.getElementById("custom-runtime-title");
+  const desc = document.getElementById("custom-runtime-description");
+  const grid = document.getElementById("custom-runtime-grid");
+  if (!overlay || !grid) return;
+  activeCustomScreenId = screen.id; widgetEditMode = false; selectedWidgetId = null;
+  title.textContent = screen.title; desc.textContent = screen.description;
+  grid.innerHTML = screen.modules.map(id => {
+    const view = BUILTIN_OPERATOR_SCREENS[id];
+    return `<button type="button" class="custom-runtime-tile" data-custom-module="${escapeHtml(id)}"><b>${escapeHtml(view.title)}</b><span>${escapeHtml(view.description)}</span><small>Open →</small></button>`;
+  }).join("");
+  grid.querySelectorAll("[data-custom-module]").forEach(btn => btn.addEventListener("click", () => openOperatorScreen(btn.dataset.customModule)));
+  overlay.classList.remove("hidden"); overlay.setAttribute("aria-hidden", "false");
+  applyCustomScreenMode();
+}
+function closeCustomRuntimeScreen() {
+  const overlay = document.getElementById("custom-runtime-overlay");
+  if (overlay) { overlay.classList.add("hidden"); overlay.setAttribute("aria-hidden", "true"); }
+  activeCustomScreenId = null; widgetEditMode = false; selectedWidgetId = null;
+  applyCustomScreenMode();
+}
+
+// ---------- Custom screen widgets ----------
+// A custom operator screen can hold live widgets bound to OMS tags.
+// Layout is edited in Design mode; widgets are live in Simulation/Runtime.
+// Values are updated IN PLACE (never rebuilt per tick) so clicks are not lost.
+const WIDGET_TYPES = {
+  value: { label: "Value", w: 160, h: 80 },
+  indicator: { label: "Indicator", w: 160, h: 50 },
+  button: { label: "Button", w: 140, h: 56 },
+  label: { label: "Label", w: 220, h: 40 },
+  alarms: { label: "Alarms", w: 160, h: 80 },
+};
+const WIDGET_COLORS = { green: "#2fbf5b", red: "#e04545", yellow: "#e0b030", blue: "#3d8bdc" };
+const WIDGET_GRID = 10;
+
+function sanitizeWidgets(raw) {
+  if (!Array.isArray(raw)) return [];
+  const num = (v, d, min, max) => { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : d; };
+  return raw.filter(w => w && WIDGET_TYPES[w.type]).map((w, i) => ({
+    id: String(w.id || `w_${Date.now()}_${i}`),
+    type: w.type,
+    x: num(w.x, 20, 0, 5000), y: num(w.y, 20, 0, 5000),
+    w: num(w.w, WIDGET_TYPES[w.type].w, 30, 1200), h: num(w.h, WIDGET_TYPES[w.type].h, 20, 800),
+    tag: String(w.tag || ""), label: String(w.label ?? ""), unit: String(w.unit || ""),
+    decimals: (w.decimals === "" || w.decimals == null) ? "" : num(w.decimals, 0, 0, 6),
+    color: WIDGET_COLORS[w.color] ? w.color : "green",
+    mode: ["momentary", "toggle", "set"].includes(w.mode) ? w.mode : "momentary",
+    setValue: String(w.setValue ?? "1"),
+  }));
+}
+function currentCustomScreen() { return customOperatorScreens.find(s => s.id === activeCustomScreenId) || null; }
+function widgetTagMap() { return new Map((latestTags || []).map(t => [t.name, t])); }
+function widgetIsOn(tag) {
+  const v = tag?.value;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") return v !== "" && v !== "0" && v.toLowerCase() !== "false";
+  return !!v;
+}
+function widgetButtonsEnabled() { return (isSimulationMode() || isRuntimeMode()) && !widgetEditMode; }
+function formatWidgetValue(w, tag) {
+  if (!tag) return "—";
+  const v = tag.value;
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "boolean") return v ? "ON" : "OFF";
+  const txt = typeof v === "number" && w.decimals !== "" ? v.toFixed(w.decimals) : String(v);
+  return w.unit ? `${txt} ${w.unit}` : txt;
+}
+function widgetOnOffValue(tag, on) { return typeof tag?.value === "boolean" ? on : (on ? 1 : 0); }
+function parseWidgetSetValue(text, tag) {
+  if (typeof tag?.value === "boolean") return !["", "0", "false", "off"].includes(String(text).trim().toLowerCase());
+  if (typeof tag?.value === "number") { const n = Number(text); return Number.isFinite(n) ? n : 0; }
+  return String(text);
+}
+function sendWidgetTag(name, value) { send({ action: "set_tag", name, value }); }
+
+function renderWidgetCanvas() {
+  const canvas = document.getElementById("widget-canvas");
+  const screen = currentCustomScreen();
+  if (!canvas) return;
+  canvas.classList.toggle("editing", widgetEditMode);
+  if (!screen) { canvas.innerHTML = ""; return; }
+  canvas.innerHTML = screen.widgets.map(w => {
+    const title = escapeHtml(w.label || w.tag || WIDGET_TYPES[w.type].label);
+    const inner = {
+      value: `<span class="cw-title">${title}</span><span class="cw-val" data-role="val">—</span>`,
+      indicator: `<span class="cw-lamp" data-role="lamp"></span><span class="cw-title">${title}</span>`,
+      button: `<button type="button" class="cw-btn" data-role="btn">${title}</button>`,
+      label: `<span class="cw-text">${escapeHtml(w.label || "Label")}</span>`,
+      alarms: `<span class="cw-title">${escapeHtml(w.label || "Active alarms")}</span><span class="cw-val" data-role="val">0</span>`,
+    }[w.type];
+    return `<div class="cw cw-${w.type} ${widgetEditMode && w.id === selectedWidgetId ? "selected" : ""}" data-wid="${escapeHtml(w.id)}" style="left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px">${inner}</div>`;
+  }).join("");
+  updateCustomWidgetValues();
+}
+
+function setTextIfChanged(el, text) { if (el && el.textContent !== text) el.textContent = text; }
+function updateCustomWidgetValues() {
+  const canvas = document.getElementById("widget-canvas");
+  const screen = currentCustomScreen();
+  if (!canvas || !screen) return;
+  const tags = widgetTagMap();
+  const enabled = widgetButtonsEnabled();
+  canvas.querySelectorAll("[data-wid]").forEach(el => {
+    const w = screen.widgets.find(x => x.id === el.dataset.wid);
+    if (!w) return;
+    const tag = tags.get(w.tag);
+    el.classList.toggle("missing", w.type !== "label" && w.type !== "alarms" && !!w.tag && !tag);
+    if (w.type === "value") setTextIfChanged(el.querySelector('[data-role="val"]'), formatWidgetValue(w, tag));
+    else if (w.type === "indicator") {
+      const lamp = el.querySelector('[data-role="lamp"]');
+      const on = !!tag && widgetIsOn(tag);
+      lamp.style.background = on ? WIDGET_COLORS[w.color] : "#26323d";
+      lamp.style.boxShadow = on ? `0 0 10px ${WIDGET_COLORS[w.color]}` : "none";
+    } else if (w.type === "button") {
+      const btn = el.querySelector('[data-role="btn"]');
+      const usable = enabled && !!tag && tag.writable !== false;
+      btn.disabled = !usable;
+      btn.title = usable ? "" : (!w.tag ? "No tag selected" : !tag ? "Tag not found" : widgetEditMode ? "" : (isDesignMode() ? "Active in Simulation / Runtime" : "Tag is read-only"));
+      btn.classList.toggle("on", !!tag && w.mode === "toggle" && widgetIsOn(tag));
+    } else if (w.type === "alarms") {
+      const active = latestAlarms.active || [];
+      setTextIfChanged(el.querySelector('[data-role="val"]'), String(latestAlarms.active_count ?? active.length));
+      el.classList.toggle("alarm-on", active.some(x => !x.acknowledged));
+    }
+  });
+}
+
+function selectWidget(id) {
+  selectedWidgetId = id;
+  document.querySelectorAll("#widget-canvas [data-wid]").forEach(el => el.classList.toggle("selected", widgetEditMode && el.dataset.wid === id));
+  renderWidgetEditor();
+}
+function addWidget(type) {
+  const screen = currentCustomScreen();
+  if (!screen || !WIDGET_TYPES[type]) return;
+  const n = screen.widgets.length % 12;
+  const [w] = sanitizeWidgets([{ id: `w_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, type, x: 20 + n * 20, y: 20 + n * 20, label: type === "label" ? "Label" : "" }]);
+  screen.widgets.push(w);
+  selectedWidgetId = w.id;
+  persistOperatorScreens(); renderWidgetCanvas(); renderWidgetEditor();
+}
+function deleteSelectedWidget() {
+  const screen = currentCustomScreen();
+  if (!screen || !selectedWidgetId) return;
+  screen.widgets = screen.widgets.filter(w => w.id !== selectedWidgetId);
+  selectedWidgetId = null;
+  persistOperatorScreens(); renderWidgetCanvas(); renderWidgetEditor();
+}
+
+function renderWidgetEditor() {
+  const panel = document.getElementById("widget-editor");
+  if (!panel) return;
+  const screen = currentCustomScreen();
+  panel.hidden = !(widgetEditMode && screen);
+  if (panel.hidden) return;
+  const w = screen.widgets.find(x => x.id === selectedWidgetId);
+  const tools = Object.entries(WIDGET_TYPES).map(([t, d]) => `<button type="button" class="widget-tool" data-add-widget="${t}">+ ${d.label}</button>`).join("");
+  const tagList = `<datalist id="widget-tag-list">${(latestTags || []).map(t => `<option value="${escapeHtml(t.name)}"></option>`).join("")}</datalist>`;
+  const field = (key, label, type = "text", extra = "") => `<label>${label}<input data-wf="${key}" type="${type}" value="${escapeHtml(w[key])}" ${extra}></label>`;
+  let form = '<p class="widget-hint">Click a widget to edit it, or add one above. Drag to move.</p>';
+  if (w) {
+    form = `<div class="widget-form-title">${WIDGET_TYPES[w.type].label}</div>`;
+    if (w.type !== "alarms" || true) form += field("label", "Label");
+    if (w.type === "value" || w.type === "indicator" || w.type === "button") form += field("tag", "Tag", "text", 'list="widget-tag-list" autocomplete="off"');
+    if (w.type === "value") form += field("unit", "Unit") + field("decimals", "Decimals (empty = auto)", "number", 'min="0" max="6"');
+    if (w.type === "indicator") form += `<label>On color<select data-wf="color">${Object.keys(WIDGET_COLORS).map(c => `<option value="${c}" ${w.color === c ? "selected" : ""}>${c}</option>`).join("")}</select></label>`;
+    if (w.type === "button") {
+      form += `<label>Mode<select data-wf="mode">${[["momentary", "Momentary (hold)"], ["toggle", "Toggle"], ["set", "Set value"]].map(([v, t]) => `<option value="${v}" ${w.mode === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
+      if (w.mode === "set") form += field("setValue", "Value to write");
+    }
+    form += `<div class="widget-geom">${field("x", "X", "number", 'min="0"')}${field("y", "Y", "number", 'min="0"')}${field("w", "W", "number", 'min="30"')}${field("h", "H", "number", 'min="20"')}</div>`;
+    form += '<button type="button" class="widget-delete" data-delete-widget>Delete widget</button>';
+  }
+  panel.innerHTML = `<div class="widget-tools">${tools}</div>${tagList}${form}`;
+}
+
+function syncWidgetGeometryInputs(w) {
+  document.querySelectorAll("#widget-editor [data-wf]").forEach(inp => {
+    if (["x", "y", "w", "h"].includes(inp.dataset.wf)) inp.value = w[inp.dataset.wf];
+  });
+}
+
+document.getElementById("widget-editor")?.addEventListener("click", e => {
+  const add = e.target.closest("[data-add-widget]");
+  if (add) { addWidget(add.dataset.addWidget); return; }
+  if (e.target.closest("[data-delete-widget]")) deleteSelectedWidget();
+});
+document.getElementById("widget-editor")?.addEventListener("input", e => {
+  const key = e.target.dataset?.wf;
+  const screen = currentCustomScreen();
+  const w = screen?.widgets.find(x => x.id === selectedWidgetId);
+  if (!key || !w) return;
+  const raw = e.target.value;
+  if (["x", "y", "w", "h"].includes(key)) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+    w[key] = Math.max(key === "w" ? 30 : key === "h" ? 20 : 0, Math.round(n));
+  } else if (key === "decimals") {
+    w.decimals = raw === "" ? "" : Math.min(6, Math.max(0, Math.round(Number(raw)) || 0));
+  } else {
+    w[key] = raw;
+  }
+  persistOperatorScreens();
+  renderWidgetCanvas();
+  if (key === "mode") renderWidgetEditor();
+});
+
+document.getElementById("widget-canvas")?.addEventListener("pointerdown", e => {
+  const el = e.target.closest("[data-wid]");
+  const screen = currentCustomScreen();
+  if (!screen) return;
+  if (!el) { if (widgetEditMode && selectedWidgetId) selectWidget(null); return; }
+  const w = screen.widgets.find(x => x.id === el.dataset.wid);
+  if (!w) return;
+
+  if (widgetEditMode) {                       // ---- drag to move
+    e.preventDefault();
+    selectWidget(w.id);
+    const sx = e.clientX, sy = e.clientY, ox = w.x, oy = w.y;
+    let moved = false;
+    el.setPointerCapture(e.pointerId);
+    const move = ev => {
+      moved = true;
+      w.x = Math.max(0, Math.round((ox + ev.clientX - sx) / WIDGET_GRID) * WIDGET_GRID);
+      w.y = Math.max(0, Math.round((oy + ev.clientY - sy) / WIDGET_GRID) * WIDGET_GRID);
+      el.style.left = `${w.x}px`; el.style.top = `${w.y}px`;
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      if (moved) { persistOperatorScreens(); syncWidgetGeometryInputs(w); }
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    return;
+  }
+
+  if (w.type !== "button" || !e.target.closest(".cw-btn")) return;   // ---- live button
+  const tag = widgetTagMap().get(w.tag);
+  if (!widgetButtonsEnabled() || !tag || tag.writable === false) return;
+  if (w.mode === "toggle") { sendWidgetTag(w.tag, widgetOnOffValue(tag, !widgetIsOn(tag))); return; }
+  if (w.mode === "set") { sendWidgetTag(w.tag, parseWidgetSetValue(w.setValue, tag)); return; }
+  sendWidgetTag(w.tag, widgetOnOffValue(tag, true));                  // momentary: on while held
+  const release = () => {
+    window.removeEventListener("pointerup", release);
+    window.removeEventListener("pointercancel", release);
+    sendWidgetTag(w.tag, widgetOnOffValue(tag, false));
+  };
+  window.addEventListener("pointerup", release);
+  window.addEventListener("pointercancel", release);
+});
+
+document.getElementById("widget-edit-btn")?.addEventListener("click", () => {
+  widgetEditMode = !widgetEditMode;
+  selectedWidgetId = null;
+  applyCustomScreenMode();
+});
+
+function applyCustomScreenMode() {
+  if (!isDesignMode()) widgetEditMode = false;
+  const btn = document.getElementById("widget-edit-btn");
+  if (btn) { btn.hidden = !(isDesignMode() && activeCustomScreenId); btn.textContent = widgetEditMode ? "Done editing" : "Edit layout"; }
+  document.getElementById("custom-runtime-overlay")?.classList.toggle("widget-editing", widgetEditMode);
+  renderWidgetCanvas();
+  renderWidgetEditor();
+}
+
+document.getElementById("screens-btn")?.addEventListener("click", () => setScreensOpen(true));
+document.getElementById("screens-close-btn")?.addEventListener("click", () => setScreensOpen(false));
+document.getElementById("screens-overlay")?.addEventListener("click", e => { if (e.target.id === "screens-overlay") setScreensOpen(false); });
+document.getElementById("custom-screen-cancel-btn")?.addEventListener("click", () => setCustomScreenEditorOpen(false));
+document.getElementById("custom-screen-create-btn")?.addEventListener("click", createCustomOperatorScreen);
+document.getElementById("custom-runtime-close-btn")?.addEventListener("click", () => closeCustomRuntimeScreen());
+document.addEventListener("keydown", e => { if (e.key === "Escape" && screensOpen) setScreensOpen(false); });
+function renderRuntimeScreenBar() {
+  const bar = document.getElementById("runtime-screen-bar");
+  if (!bar) return;
+  const visible = isRuntimeMode();
+  bar.classList.toggle("hidden", !visible);
+  if (!visible) return;
+
+  const screens = allOperatorScreens();
+  const ids = [
+    "machine", "dashboard", "alarms", "trends", "production",
+    "diagnostics", "reports", ...customOperatorScreens.map(s => s.id)
+  ];
+
+  // Keep only valid screen IDs so one stale project entry cannot break
+  // the whole navigation bar.
+  const validIds = ids.filter(id => screens[id]);
+  bar.innerHTML = validIds.map(id => `
+    <button type="button" data-operator-screen="${escapeHtml(id)}"
+      class="runtime-screen-btn ${activeOperatorScreen === id ? "active" : ""}">
+      ${escapeHtml(screens[id].title)}${id === "alarms" ? '<span class="runtime-badge" hidden></span>' : ""}
+    </button>`).join("");
+  updateAlarmBadge();
+}
+function updateAlarmBadge() {
+  const badge = document.querySelector('#runtime-screen-bar [data-operator-screen="alarms"] .runtime-badge');
+  if (!badge) return;
+  const active = latestAlarms.active || [];
+  const total = latestAlarms.active_count ?? active.length;
+  const unack = active.filter(x => !x.acknowledged).length;
+  badge.textContent = String(total);
+  badge.hidden = total === 0;
+  badge.classList.toggle("unack", unack > 0);
+}
+
+// One delegated handler is more reliable than rebinding individual buttons
+// every time the bar is rebuilt. It also keeps navigation working after a
+// project load or when custom screens are added/deleted.
+document.getElementById("runtime-screen-bar")?.addEventListener("click", e => {
+  const btn = e.target.closest("[data-operator-screen]");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openOperatorScreen(btn.dataset.operatorScreen);
+});
+
+function updateOperatorScreenBar() { renderRuntimeScreenBar(); }
 
 document.getElementById("dashboard-btn")?.addEventListener("click", () => setDashboardOpen(true));
 document.getElementById("dashboard-close-btn")?.addEventListener("click", () => setDashboardOpen(false));

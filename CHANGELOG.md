@@ -1,3 +1,8 @@
+## v11.10 — Operator Screens
+- Added an operator screen navigator and Runtime-only navigation bar.
+- Reuses existing Dashboard, Reports, Alarms, Trends, Production and Diagnostics views.
+- No new Inspector tabs.
+
 ## v11.8 — Project Save/Load Hardening
 
 - Added project schema validation before loading.
@@ -160,3 +165,11 @@
 - Added Recover action to restore the latest automatic backup after an unexpected browser/app close.
 - Added backend project snapshot endpoint used by recovery without changing Save behavior.
 - Recovery backup is refreshed shortly after project edits and is cleared from active dirty state after a normal save.
+
+## v11.11 - Configurable Operator Screens
+- Added project-specific operator screens without adding Inspector tabs.
+- Added Screens manager with New Screen and Delete actions.
+- Custom screens can combine existing Machine, Dashboard, Alarms, Trends, Production, Diagnostics, and Reports views.
+- Custom operator screen definitions are persisted in project metadata and restored when a project is opened.
+- Runtime navigation automatically includes configured custom screens.
+- Added a dedicated custom-screen operator view with navigation back to existing OMS views.

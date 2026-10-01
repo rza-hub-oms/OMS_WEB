@@ -490,6 +490,7 @@ async def websocket_endpoint(ws: WebSocket):
                         "project_loaded": {
                             "name": session.project.name,
                             "version": session.project.version,
+                            "metadata": session.project.metadata,
                             "tags": session.scene.tag_catalog(),
                             "plc": _plc_status(session),
                         }
@@ -521,6 +522,9 @@ async def websocket_endpoint(ws: WebSocket):
                     }))
                 elif action == "save_project":
                     from project.serialization import scene_to_project_dict
+                    client_metadata = command.get("metadata")
+                    if isinstance(client_metadata, dict):
+                        session.project.metadata.update(client_metadata)
                     await ws.send_text(json.dumps({
                         "project_data": scene_to_project_dict(
                             session.scene,
@@ -721,6 +725,7 @@ async def _session_tick_loop(ws: WebSocket, session: ProjectSession) -> None:
                     "project": {
                         "name": session.project.name,
                         "version": session.project.version,
+                        "metadata": session.project.metadata,
                     },
                 },
             )

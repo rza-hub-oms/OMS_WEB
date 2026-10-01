@@ -65,6 +65,7 @@
       <button type="button" id="runtime-mode-btn" class="mode-btn">Runtime</button>
       <button type="button" id="dashboard-btn" class="mode-btn dashboard-toolbar-btn">Dashboard</button>
       <button type="button" id="reports-btn" class="mode-btn dashboard-toolbar-btn">Reports</button>
+      <button type="button" id="screens-btn" class="mode-btn dashboard-toolbar-btn">Screens</button>
     </div>
 
     <div class="toolbar-divider"></div>
@@ -144,6 +145,66 @@
     </div>
   </div>
 
+  <div id="screens-overlay" class="dashboard-overlay hidden" aria-hidden="true">
+    <div class="dashboard-shell screens-shell">
+      <div class="dashboard-header">
+        <div>
+          <div class="dashboard-title">OMS OPERATOR SCREENS</div>
+          <div class="dashboard-subtitle">Navigate the operator workspace without adding Inspector tabs.</div>
+        </div>
+        <div class="dashboard-header-actions">
+          <button type="button" id="screens-close-btn" class="dashboard-close">Close</button>
+        </div>
+      </div>
+      <div id="operator-screen-grid" class="operator-screen-grid"></div>
+      <div id="operator-screen-editor" class="operator-screen-editor hidden">
+        <div class="operator-screen-editor-panel">
+          <div class="dashboard-card-title">NEW OPERATOR SCREEN</div>
+          <label>Screen name <input id="custom-screen-title" type="text" maxlength="40" placeholder="e.g. Packaging"></label>
+          <label>Description <input id="custom-screen-description" type="text" maxlength="120" placeholder="Operator view description"></label>
+          <div class="screen-module-title">Include operator views</div>
+          <div class="screen-module-grid">
+            <label><input type="checkbox" data-screen-module="machine"> Machine</label>
+            <label><input type="checkbox" data-screen-module="dashboard"> Dashboard</label>
+            <label><input type="checkbox" data-screen-module="alarms"> Alarms</label>
+            <label><input type="checkbox" data-screen-module="trends"> Trends</label>
+            <label><input type="checkbox" data-screen-module="production"> Production</label>
+            <label><input type="checkbox" data-screen-module="diagnostics"> Diagnostics</label>
+            <label><input type="checkbox" data-screen-module="reports"> Reports</label>
+          </div>
+          <div class="operator-screen-editor-actions">
+            <button type="button" id="custom-screen-cancel-btn">Cancel</button>
+            <button type="button" id="custom-screen-create-btn" class="apply">Create Screen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="custom-runtime-overlay" class="dashboard-overlay hidden" aria-hidden="true">
+    <div class="dashboard-shell custom-runtime-shell">
+      <div class="dashboard-header">
+        <div><div id="custom-runtime-title" class="dashboard-title">Operator Screen</div><div id="custom-runtime-description" class="dashboard-subtitle"></div></div>
+        <div class="dashboard-header-actions"><button type="button" id="widget-edit-btn" class="dashboard-close" hidden>Edit layout</button><button type="button" id="custom-runtime-close-btn" class="dashboard-close">Back</button></div>
+      </div>
+      <div id="custom-runtime-grid" class="custom-runtime-grid"></div>
+      <div class="widget-stage">
+        <div class="widget-canvas-wrap"><div id="widget-canvas" class="widget-canvas"></div></div>
+        <aside id="widget-editor" class="widget-editor" hidden></aside>
+      </div>
+    </div>
+  </div>
+
+  <div id="runtime-screen-bar" class="runtime-screen-bar hidden" aria-label="Operator screen navigation">
+    <button type="button" data-operator-screen="machine" class="runtime-screen-btn active">Machine</button>
+    <button type="button" data-operator-screen="dashboard" class="runtime-screen-btn">Dashboard</button>
+    <button type="button" data-operator-screen="alarms" class="runtime-screen-btn">Alarms</button>
+    <button type="button" data-operator-screen="trends" class="runtime-screen-btn">Trends</button>
+    <button type="button" data-operator-screen="production" class="runtime-screen-btn">Production</button>
+    <button type="button" data-operator-screen="diagnostics" class="runtime-screen-btn">Diagnostics</button>
+    <button type="button" data-operator-screen="reports" class="runtime-screen-btn">Reports</button>
+  </div>
+
   <div id="reports-overlay" class="dashboard-overlay hidden" aria-hidden="true">
     <div class="dashboard-shell reports-shell">
       <div class="dashboard-header">
@@ -198,7 +259,7 @@
     </div>
 
     <aside id="properties">
-      <div class="panel-title">INSPECTOR</div>
+      <div class="panel-title">INSPECTOR<button type="button" id="panel-fullscreen-close" class="dashboard-close panel-fullscreen-close">Back</button></div>
 
       <div class="tabs">
         <button type="button" class="tab active" data-tab="properties">Properties</button>
@@ -553,6 +614,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=16"></script>
+  <script type="module" src="app.js?v=20"></script>
 </body>
 </html>

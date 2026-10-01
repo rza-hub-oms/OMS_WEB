@@ -127,3 +127,10 @@ Project loading now validates the project before replacing the current scene. Un
 
 ### Project recovery (v11.9)
 OMS keeps a recent recovery snapshot in the browser's local storage while a project has unsaved changes. Use **Recover** in the File toolbar after an unexpected close. After recovery, save the project normally. Recovery does not add an Inspector tab.
+
+
+### v11.10 Operator Screens
+The Runtime mode now provides a dedicated operator screen navigator and bottom navigation bar. Existing Dashboard, Reports and Inspector panels are reused; no additional Inspector tabs were introduced.
+
+### v11.11 Operator Screens
+The Screens workspace now supports project-specific operator screens. Custom screens are built from existing OMS operator views (Machine, Dashboard, Alarms, Trends, Production, Diagnostics and Reports), saved in project metadata, and exposed in Runtime navigation. No additional Inspector tabs are required.

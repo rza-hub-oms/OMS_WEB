@@ -17,7 +17,7 @@ from core.production import ProductionTracker
 class Project:
     scene: Scene = field(default_factory=Scene)
     name: str = "Untitled"
-    version: int = 11
+    version: int = 12
     metadata: dict = field(default_factory=dict)
 
     def reset(self) -> None:
