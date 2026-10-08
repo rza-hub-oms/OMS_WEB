@@ -2948,3 +2948,11 @@ body.panel-fullscreen .panel-fullscreen-close { display: inline-block; }
 .widget-editor input, .widget-editor select { width: 100%; box-sizing: border-box; margin-top: 4px; }
 .widget-geom { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
 .widget-hint { color: #8fa2b5; line-height: 1.5; }
+
+/* v11.13 HMI widget extensions */
+.cw-kpi, .cw-production, .cw-plc_status, .cw-machine_status { flex-direction: column; justify-content: center; gap: 4px; padding: 10px 12px; border: 1px solid #2b4054; border-radius: 10px; background: #0e1924; }
+.cw-status { font-size: 18px; font-weight: 800; color: #eef5fb; }
+.cw-plc_status.status-ok .cw-status, .cw-machine_status.status-ok .cw-status { color: #55d47a; }
+.cw-plc_status.status-fault .cw-status, .cw-machine_status.status-fault .cw-status { color: #ff6b6b; }
+.cw-trend { width: 100%; height: calc(100% - 20px); color: #4da3ff; overflow: visible; }
+.cw-trend-empty { fill: #7f93a6; font-size: 11px; }

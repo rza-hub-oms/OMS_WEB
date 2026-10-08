@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.scene import COMPONENT_REGISTRY
 
-PROJECT_VERSION = 12
+PROJECT_VERSION = 13
 
 _SETTER_OVERRIDES = {
     "rotation": "rotation_value",

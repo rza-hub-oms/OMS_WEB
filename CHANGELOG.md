@@ -173,3 +173,9 @@
 - Custom operator screen definitions are persisted in project metadata and restored when a project is opened.
 - Runtime navigation automatically includes configured custom screens.
 - Added a dedicated custom-screen operator view with navigation back to existing OMS views.
+
+## v11.13 — HMI Widget Extensions
+- Expanded custom operator screens with reusable KPI, Production, PLC Status, Mini Trend, and Machine Status widgets.
+- Added live binding/refresh using existing OMS production, trend, PLC, machine-state, and tag data.
+- Added widget metric configuration without adding Inspector tabs.
+- Project version advanced to 13.

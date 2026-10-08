@@ -134,3 +134,6 @@ The Runtime mode now provides a dedicated operator screen navigator and bottom n
 
 ### v11.11 Operator Screens
 The Screens workspace now supports project-specific operator screens. Custom screens are built from existing OMS operator views (Machine, Dashboard, Alarms, Trends, Production, Diagnostics and Reports), saved in project metadata, and exposed in Runtime navigation. No additional Inspector tabs are required.
+
+### v11.13 HMI Widget Extensions
+Custom operator screens now support reusable KPI, Production, PLC Status, Mini Trend, and Machine Status widgets in addition to Value, Indicator, Button, Label, and Alarms. Widgets are configured in the Screens workspace and use existing OMS state/tags; no additional Inspector tab is required.

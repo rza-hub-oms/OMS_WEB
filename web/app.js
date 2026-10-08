@@ -848,6 +848,7 @@ setMessageHandler((event) => {
     renderProduction();
   }
   render(latestState);
+  updateCustomWidgetValues();
   renderDashboard();
   if (reportsOpen) renderReports();
   renderPlcStatus(latestPlc);
@@ -1752,6 +1753,11 @@ const WIDGET_TYPES = {
   button: { label: "Button", w: 140, h: 56 },
   label: { label: "Label", w: 220, h: 40 },
   alarms: { label: "Alarms", w: 160, h: 80 },
+  kpi: { label: "KPI", w: 180, h: 90 },
+  production: { label: "Production", w: 180, h: 90 },
+  plc_status: { label: "PLC Status", w: 180, h: 70 },
+  trend: { label: "Mini Trend", w: 300, h: 140 },
+  machine_status: { label: "Machine Status", w: 200, h: 90 },
 };
 const WIDGET_COLORS = { green: "#2fbf5b", red: "#e04545", yellow: "#e0b030", blue: "#3d8bdc" };
 const WIDGET_GRID = 10;
@@ -1769,6 +1775,7 @@ function sanitizeWidgets(raw) {
     color: WIDGET_COLORS[w.color] ? w.color : "green",
     mode: ["momentary", "toggle", "set"].includes(w.mode) ? w.mode : "momentary",
     setValue: String(w.setValue ?? "1"),
+    metric: String(w.metric || "oee"),
   }));
 }
 function currentCustomScreen() { return customOperatorScreens.find(s => s.id === activeCustomScreenId) || null; }
@@ -1810,6 +1817,11 @@ function renderWidgetCanvas() {
       button: `<button type="button" class="cw-btn" data-role="btn">${title}</button>`,
       label: `<span class="cw-text">${escapeHtml(w.label || "Label")}</span>`,
       alarms: `<span class="cw-title">${escapeHtml(w.label || "Active alarms")}</span><span class="cw-val" data-role="val">0</span>`,
+      kpi: `<span class="cw-title">${title}</span><span class="cw-val" data-role="val">—</span>`,
+      production: `<span class="cw-title">${escapeHtml(w.label || "Production")}</span><span class="cw-val" data-role="val">0</span>`,
+      plc_status: `<span class="cw-title">${escapeHtml(w.label || "PLC Status")}</span><span class="cw-status" data-role="val">—</span>`,
+      trend: `<span class="cw-title">${title}</span><svg class="cw-trend" data-role="trend" viewBox="0 0 280 95" preserveAspectRatio="none"></svg>`,
+      machine_status: `<span class="cw-title">${escapeHtml(w.label || "Machine Status")}</span><span class="cw-status" data-role="val">—</span>`,
     }[w.type];
     return `<div class="cw cw-${w.type} ${widgetEditMode && w.id === selectedWidgetId ? "selected" : ""}" data-wid="${escapeHtml(w.id)}" style="left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px">${inner}</div>`;
   }).join("");
@@ -1844,6 +1856,40 @@ function updateCustomWidgetValues() {
       const active = latestAlarms.active || [];
       setTextIfChanged(el.querySelector('[data-role="val"]'), String(latestAlarms.active_count ?? active.length));
       el.classList.toggle("alarm-on", active.some(x => !x.acknowledged));
+    } else if (w.type === "kpi") {
+      const p = latestProduction || {};
+      const values = { oee: `${((p.oee || 0) * 100).toFixed(1)}%`, availability: `${((p.availability || 0) * 100).toFixed(1)}%`, performance: `${((p.performance || 0) * 100).toFixed(1)}%`, quality: `${((p.quality || 0) * 100).toFixed(1)}%`, total: String(p.total_count ?? 0), good: String(p.good_count ?? 0), reject: String(p.reject_count ?? 0) };
+      setTextIfChanged(el.querySelector('[data-role="val"]'), values[w.metric] ?? "—");
+    } else if (w.type === "production") {
+      const p = latestProduction || {};
+      const values = { total: p.total_count ?? 0, good: p.good_count ?? 0, reject: p.reject_count ?? 0 };
+      setTextIfChanged(el.querySelector('[data-role="val"]'), String(values[w.metric] ?? 0));
+    } else if (w.type === "plc_status") {
+      const plc = latestPlc || {};
+      const status = plc.connected ? (plc.comms_healthy === false ? "COMMS LOST" : "CONNECTED") : "NOT CONNECTED";
+      setTextIfChanged(el.querySelector('[data-role="val"]'), status);
+      el.classList.toggle("status-ok", plc.connected && plc.comms_healthy !== false);
+      el.classList.toggle("status-fault", !plc.connected || plc.comms_healthy === false);
+    } else if (w.type === "machine_status") {
+      const objects = Object.values(latestState || {});
+      const faults = objects.filter(o => o && (o.fault || o.error)).length;
+      const running = objects.filter(o => o && (o.running || o.moving)).length;
+      setTextIfChanged(el.querySelector('[data-role="val"]'), faults ? `${faults} FAULT${faults === 1 ? "" : "S"}` : (running ? `${running} RUNNING` : "READY"));
+      el.classList.toggle("status-fault", faults > 0);
+      el.classList.toggle("status-ok", faults === 0 && running > 0);
+    } else if (w.type === "trend") {
+      const svg = el.querySelector('[data-role="trend"]');
+      const name = w.tag || (latestTrends?.selected || [])[0];
+      const samples = latestTrends?.samples || [];
+      const points = samples.map(s => Number(s.values?.[name])).filter(Number.isFinite);
+      if (svg) {
+        if (points.length < 2) svg.innerHTML = '<text x="140" y="50" text-anchor="middle" class="cw-trend-empty">No samples</text>';
+        else {
+          const min = Math.min(...points), max = Math.max(...points), span = max - min || 1;
+          const poly = points.map((v, i) => `${(i / (points.length - 1)) * 280},${92 - ((v - min) / span) * 82}`).join(" ");
+          svg.innerHTML = `<polyline points="${poly}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"></polyline>`;
+        }
+      }
     }
   });
 }
@@ -1884,8 +1930,11 @@ function renderWidgetEditor() {
   if (w) {
     form = `<div class="widget-form-title">${WIDGET_TYPES[w.type].label}</div>`;
     if (w.type !== "alarms" || true) form += field("label", "Label");
-    if (w.type === "value" || w.type === "indicator" || w.type === "button") form += field("tag", "Tag", "text", 'list="widget-tag-list" autocomplete="off"');
+    if (["value", "indicator", "button", "trend"].includes(w.type)) form += field("tag", "Tag", "text", 'list="widget-tag-list" autocomplete="off"');
     if (w.type === "value") form += field("unit", "Unit") + field("decimals", "Decimals (empty = auto)", "number", 'min="0" max="6"');
+    if (w.type === "kpi") form += `<label>Metric<select data-wf="metric">${[["oee","OEE"],["availability","Availability"],["performance","Performance"],["quality","Quality"],["total","Total"],["good","Good"],["reject","Reject"]].map(([v,t]) => `<option value="${v}" ${w.metric===v?"selected":""}>${t}</option>`).join("")}</select></label>`;
+    if (w.type === "production") form += `<label>Metric<select data-wf="metric">${[["total","Total"],["good","Good"],["reject","Reject"]].map(([v,t]) => `<option value="${v}" ${w.metric===v?"selected":""}>${t}</option>`).join("")}</select></label>`;
+    if (w.type === "plc_status" || w.type === "machine_status") form += '<p class="widget-hint">Live system status; no tag binding required.</p>';
     if (w.type === "indicator") form += `<label>On color<select data-wf="color">${Object.keys(WIDGET_COLORS).map(c => `<option value="${c}" ${w.color === c ? "selected" : ""}>${c}</option>`).join("")}</select></label>`;
     if (w.type === "button") {
       form += `<label>Mode<select data-wf="mode">${[["momentary", "Momentary (hold)"], ["toggle", "Toggle"], ["set", "Set value"]].map(([v, t]) => `<option value="${v}" ${w.mode === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
