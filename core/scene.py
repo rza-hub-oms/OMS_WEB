@@ -19,6 +19,7 @@ from core.components.emergency_push_button import EmergencyPushButtonBehavior
 from core.components.toggle_switch import ToggleSwitchBehavior
 from core.components.tower_light import TowerLightBehavior
 from core.components.label import LabelBehavior
+from core.components.index_table import IndexTableBehavior
 from core.logic import LogicEngine
 from core.sequence import SequenceEngine
 from core.tags import TagRegistry
@@ -36,6 +37,7 @@ COMPONENT_REGISTRY = {
     "toggle_switch": ToggleSwitchBehavior,
     "tower_light": TowerLightBehavior,
     "label": LabelBehavior,
+    "index_table": IndexTableBehavior,
 }
 
 TICK_MS = 50
@@ -236,7 +238,7 @@ class Scene:
 
     def stop_all_actuators(self) -> None:
         for obj in self.objects.values():
-            if isinstance(obj, (ConveyorBehavior, MotorBehavior)):
+            if isinstance(obj, (ConveyorBehavior, MotorBehavior, IndexTableBehavior)):
                 obj.set_running(False)
 
     def reset_simulation_state(self) -> None:
@@ -289,7 +291,7 @@ class Scene:
                 ):
                     obj.set_extended(False)
                     obj.advance_animation(dt_ms)
-                elif isinstance(obj, (ConveyorBehavior, MotorBehavior)):
+                elif isinstance(obj, (ConveyorBehavior, MotorBehavior, IndexTableBehavior)):
                     # E-Stop cuts drive power immediately -- without
                     # this, `running` stays True and the belt/status
                     # CSS keeps animating client-side even though the

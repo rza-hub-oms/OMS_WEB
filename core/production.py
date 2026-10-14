@@ -141,6 +141,7 @@ class ProductionTracker:
         running = self.running_seconds
         availability = (running / elapsed) if elapsed > 0 else 0.0
         quality = (self.good_count / self.total_count) if self.total_count > 0 else 0.0
+        reject_rate = (self.reject_count / self.total_count) if self.total_count > 0 else 0.0
         performance = 0.0
         if self.config.ideal_cycle_s > 0 and running > 0 and self.total_count > 0:
             performance = min(1.0, (self.config.ideal_cycle_s * self.total_count) / running)
@@ -157,6 +158,7 @@ class ProductionTracker:
             "availability": availability,
             "performance": performance,
             "quality": quality,
+            "reject_rate": reject_rate,
             "oee": oee,
             "configured": bool(self.config.production_trigger),
             "shift": {

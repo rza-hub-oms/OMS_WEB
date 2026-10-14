@@ -81,7 +81,9 @@ class ConveyorBehavior(SimObject):
         return self.running
 
     def get_running_status(self) -> int:
-        return int(self.running)
+        # Report physical availability, not just the run command. A fault or
+        # emergency stop blocks motion even if the PLC command remains high.
+        return int(self.running and not self.is_safety_blocked())
 
     def set_direction(self, value: int):
         self.direction_forward = bool(int(value))

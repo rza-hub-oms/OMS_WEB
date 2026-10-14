@@ -5,6 +5,7 @@ def test_trend_recorder_samples_numeric_values_at_interval():
     values = {"Motor.speed": 10.0, "Motor.current": 2}
     recorder = TrendRecorder(interval_s=1.0, max_samples=10)
     recorder.configure(list(values))
+    recorder.running = True
 
     assert recorder.sample(values.get, 0.4) is False
     assert recorder.sample(values.get, 0.6) is True
@@ -17,6 +18,7 @@ def test_trend_recorder_ignores_boolean_tags_and_is_bounded():
     values = {"Motor.running": True, "Motor.speed": 25}
     recorder = TrendRecorder(interval_s=0.0, max_samples=2)
     recorder.configure(list(values))
+    recorder.running = True
 
     recorder.sample(values.get, 0.0)
     values["Motor.speed"] = 30
@@ -34,6 +36,7 @@ def test_trend_recorder_clear_and_reconfigure():
     values = {"A": 1.0, "B": 2.0}
     recorder = TrendRecorder(interval_s=0.0)
     recorder.configure(["A"])
+    recorder.running = True
     recorder.sample(values.get, 0.0)
     assert recorder.snapshot()["samples"]
 

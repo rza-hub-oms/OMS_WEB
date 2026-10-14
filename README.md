@@ -137,3 +137,57 @@ The Screens workspace now supports project-specific operator screens. Custom scr
 
 ### v11.13 HMI Widget Extensions
 Custom operator screens now support reusable KPI, Production, PLC Status, Mini Trend, and Machine Status widgets in addition to Value, Indicator, Button, Label, and Alarms. Widgets are configured in the Screens workspace and use existing OMS state/tags; no additional Inspector tab is required.
+
+
+## v11.15 HMI widget resizing
+In Screens, open a custom screen and select **Edit layout**. Select a widget and drag the blue lower-right handle to resize it. The size snaps to the grid and is saved with the screen. You can also edit W/H in the widget editor.
+
+
+## Simulation operation controls (v11.16)
+
+In **Simulation** mode, select a conveyor or motor and use the Properties inspector's
+**Simulation Controls** section to Start/Stop and change direction. Select a cylinder
+to Extend/Retract it; dual-valve cylinders also have a Hold/Stop command. These controls
+are only shown in Simulation mode and operate the virtual component through its I/O
+interface. Runtime remains PLC-connected and is not controlled by these simulation buttons.
+The inspector reports command state separately from effective running state; motor current
+is a deterministic simulated estimate, not a physical measurement.
+
+### Simulating sensor inputs
+
+In **Simulation** mode, select a sensor and use **Force ON**, **Force OFF**, or **Auto / Physical** in the Properties inspector. Forced states are useful for testing sequence transitions before positioning physical simulated objects. Auto / Physical returns the sensor to detection based on its configured watch target and geometry. Sensor forcing is rejected in Runtime mode and does not write to the physical PLC.
+
+### Sensor-to-conveyor sequence demo
+
+In Design mode, open the Sequences panel and choose **Sensor → Conveyor Demo** after adding at least one sensor and one conveyor. OMS creates a continuous two-step sequence: run the conveyor until the sensor is active, stop the conveyor until the sensor clears, then repeat. Validate the sequence, switch to Simulation, and use the sensor's Force ON / Force OFF controls to exercise the transitions. This is a virtual simulation example, not a safety-rated machine control program.
+
+## Full Machine Cycle simulation template
+
+In the Inspector's Sequences panel, choose **Full Machine Cycle** to create a reusable example sequence. It needs a conveyor, a cylinder, a sensor whose Watch Component is the conveyor (part detection), and a second sensor whose Watch Component is the cylinder (end-position confirmation). A motor is included automatically if one exists. Validate the sequence before running it in Simulation. The template faults on missing end-position confirmation rather than assuming the cylinder moved. It is for virtual simulation only and does not execute in Runtime or directly control a physical PLC.
+
+## Sequence fault recovery and reject-rate KPI
+
+Sequence steps may define `on_fault_actions`, a list of normal I/O writes executed once when that step times out. The Full Machine Cycle template uses this to stop conveyor/motor commands and de-energize cylinder valve commands. Faulted sequences latch instead of continuing to evaluate transitions. In Simulation, use **Recover Fault** to acknowledge the fault and leave the sequence stopped, then use **Start** to explicitly restart it. These are simulation-sequence controls and are not a replacement for safety PLCs or physical machine risk assessment.
+
+The Production panel also displays **Reject Rate** (`reject_count / total_count`) as a percentage. Configure production and reject trigger tags as rising-edge boolean signals.
+
+
+### v11.17 PLC Mapping Workspace
+
+Open **Inspector → PLC Mapping → Pop out ↗** to work in a wide PLC Mapping workspace. The workspace summary shows available signals, mapped addresses, and signals that still need a PLC address. The expanded table provides more room for node/address editing and live values while retaining the existing search, grouping, browse, validation, and force functions. Close the workspace to return to the Inspector; the mapping panel itself is moved, not duplicated, so its live state and controls are preserved.
+## Latest UI fix
+
+Dialogs opened from the PLC Mapping workspace (including **Import DB Tags** and **Select PLC Address**) are layered above the workspace so they remain visible and usable. If an older stylesheet is cached, reload the page once with a hard refresh.
+
+
+
+## Logic Editor workspace
+
+The Logic Inspector tab now presents a compact launch card. Choose **Open Logic Editor** to edit simulation IF/THEN rules in a wide workspace. The workspace summarizes total rules, enabled rules, and readable I/O points while retaining the existing rule editor and validation workflow. The editor is for simulation logic and does not replace PLC safety logic.
+
+
+### Logic Editor live monitor
+The Logic Editor includes a live rule monitor for current source and destination values and condition status. Common IF-condition presets make rules quicker to configure. Edge conditions are labelled as runtime-evaluated because a single state snapshot cannot establish an edge event.
+
+## 3D Machine View (foundation)
+Use **3D Machine View** in the viewport toolbar to switch from the existing 2D layout to a 3D representation of the machine. The scene includes lighting, a floor/grid, orbit and zoom controls, and visual models for common machine components. Component placement and key simulation state (including conveyor product positions) are sourced from the existing scene state. Use **Reset camera** to restore the view. The current 3D foundation is a visualization layer, not yet a full physics-based digital twin; Three.js is loaded from a CDN when the view is opened, so network access is required.

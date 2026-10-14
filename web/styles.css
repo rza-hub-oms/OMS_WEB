@@ -817,6 +817,35 @@ button:hover { background: #25445c; border-color: #3488c7; }
 
 .mapping-actions .apply { margin: 0; width: auto; padding: 7px 14px; }
 
+/* Sequence toolbar: wrap every control instead of clipping buttons in the narrow inspector. */
+.mapping-actions.sequence-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 10px 10px 12px;
+  align-items: stretch;
+}
+.sequence-actions button {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  margin: 0;
+  padding: 6px 7px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  font-size: 11px;
+}
+.sequence-actions #sequence-demo-btn,
+.sequence-actions #sequence-machine-cycle-btn {
+  grid-column: 1 / -1;
+}
+@media (max-width: 420px) {
+  .mapping-actions.sequence-actions { gap: 5px; padding: 8px; }
+  .sequence-actions button { font-size: 10px; padding: 6px 4px; }
+}
+
+
 .motor-ui {
   position: absolute;
   box-sizing: border-box;
@@ -1632,7 +1661,7 @@ button:hover { background: #25445c; border-color: #3488c7; }
 .dirty-indicator { color: #e63c3c; font-weight: bold; margin-left: -2px; }
 .dirty-indicator.hidden { display: none; }
 
-.current-file-name { color: var(--muted); font-size: 12px; }
+.current-file-name { color: #e4edf5; font-size: 13px; font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border: 1px solid var(--edge); border-radius: 6px; background: #142030; }
 
 /* ---------- PLC tag import / picker (node-address helper) ---------- */
 
@@ -2956,3 +2985,261 @@ body.panel-fullscreen .panel-fullscreen-close { display: inline-block; }
 .cw-plc_status.status-fault .cw-status, .cw-machine_status.status-fault .cw-status { color: #ff6b6b; }
 .cw-trend { width: 100%; height: calc(100% - 20px); color: #4da3ff; overflow: visible; }
 .cw-trend-empty { fill: #7f93a6; font-size: 11px; }
+
+/* v11.15: direct resize handle for selected HMI widgets */
+.cw-resize-handle { display: none; }
+.widget-canvas.editing .cw.selected .cw-resize-handle { display: block; position: absolute; right: -1px; bottom: -1px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 3px; background: #2584d8; cursor: nwse-resize; pointer-events: auto; z-index: 5; box-sizing: border-box; }
+.widget-canvas.editing .cw.selected { overflow: visible; }
+
+
+/* Simulation-only operational controls in the Properties inspector. */
+.simulation-controls {
+  margin: 10px 0 12px;
+  padding: 10px;
+  border: 1px solid var(--border-color, #c8ced6);
+  border-radius: 8px;
+  background: var(--panel-muted, rgba(127, 127, 127, 0.07));
+}
+.simulation-controls-heading {
+  margin-bottom: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.simulation-controls-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sim-control {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-color, #b8bec7);
+  border-radius: 5px;
+  background: var(--button-bg, #f4f5f7);
+  color: var(--text-color, #222);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.sim-control:hover { filter: brightness(0.96); }
+.sim-control.sim-start { border-color: #398455; }
+.sim-control.sim-stop { border-color: #b74b4b; }
+.simulation-controls-note {
+  margin: 8px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  opacity: 0.75;
+}
+
+/* Dedicated sequence workspace keeps the Inspector calm and gives long sequences room. */
+.sequence-launch-card {
+  margin: 14px;
+  padding: 20px 16px;
+  border: 1px solid var(--border-color, #2c3e50);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(65, 108, 145, .15), rgba(28, 39, 51, .28));
+  text-align: center;
+}
+.sequence-launch-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 10px;
+  border-radius: 12px;
+  background: rgba(75, 145, 205, .17);
+  color: var(--blue, #70b5ef);
+  font-size: 26px;
+}
+.sequence-launch-card h3 { margin: 0 0 8px; font-size: 16px; }
+.sequence-launch-card p { margin: 0 auto 15px; max-width: 290px; color: #91a4b5; font-size: 12px; line-height: 1.55; }
+.sequence-launch-card #sequence-editor-open { width: 100%; min-height: 40px; }
+.sequence-launch-stats { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; padding-top: 11px; border-top: 1px solid rgba(130, 155, 177, .18); color: #91a4b5; font-size: 11px; }
+#sequence-editor-content { display: none; }
+.sequence-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: clamp(0px, 2vh, 20px);
+  background: rgba(4, 10, 16, .78);
+  backdrop-filter: blur(5px);
+}
+.sequence-editor-overlay.hidden { display: none; }
+.sequence-editor-window {
+  display: flex;
+  flex-direction: column;
+  width: min(1440px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #34495b;
+  border-radius: 12px;
+  background: var(--panel-bg, #111a23);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .5);
+}
+.sequence-editor-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px; border-bottom: 1px solid #2a3a49; background: #17232e; }
+.sequence-editor-header h2 { margin: 3px 0 4px; font-size: 20px; }
+.sequence-editor-header p { margin: 0; color: #91a4b5; font-size: 12px; }
+.sequence-editor-eyebrow { color: #7eb8e7; font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+.sequence-editor-close { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 9px 12px; border: 1px solid #415466; border-radius: 7px; background: #202f3d; color: #e4edf5; cursor: pointer; }
+.sequence-editor-modal-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px 24px; }
+.sequence-editor-modal-body #sequence-editor-content { display: block; }
+.sequence-editor-modal-body .sequence-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 0 12px; }
+.sequence-editor-modal-body .sequence-actions button { width: auto; min-width: 110px; min-height: 36px; padding: 8px 12px; white-space: nowrap; font-size: 12px; }
+.sequence-editor-modal-body .sequence-actions #sequence-demo-btn,
+.sequence-editor-modal-body .sequence-actions #sequence-machine-cycle-btn { flex: 1 1 190px; }
+.sequence-editor-modal-body .hint { max-width: 100%; }
+.sequence-editor-modal-body .sequence-card { margin-bottom: 14px; }
+.sequence-editor-modal-body .sequence-row { flex-wrap: nowrap; }
+.sequence-editor-modal-body .sequence-row .sequence-select { min-width: 120px; }
+.sequence-editor-modal-body .sequence-row .step-condition-value { width: 100px; }
+@media (max-width: 760px) {
+  .sequence-editor-overlay { padding: 0; }
+  .sequence-editor-window { border-radius: 0; }
+  .sequence-editor-header { padding: 14px; }
+  .sequence-editor-header h2 { font-size: 17px; }
+  .sequence-editor-modal-body { padding: 12px; }
+  .sequence-editor-modal-body .sequence-row { flex-wrap: wrap; }
+  .sequence-editor-modal-body .sequence-actions button { flex: 1 1 42%; min-width: 0; white-space: normal; }
+}
+
+.tab-popout-btn { flex: 1 1 100%; margin: 4px 6px; padding: 6px 10px; border: 1px solid #415466; border-radius: 6px; background: #202f3d; color: #e4edf5; cursor: pointer; font-size: 12px; white-space: nowrap; }
+#panel-popout-body > .tab-panel { display: block; height: auto; }
+
+/* ---------- Index (round clocking) table ---------- */
+.index-table-ui { position: absolute; box-sizing: border-box; cursor: pointer; user-select: none; }
+.index-table-ui .it-svg { width: 100%; height: 100%; display: block; }
+.it-base { fill: #1b2733; stroke: #3b5166; stroke-width: 3; }
+.it-hub { fill: #263746; stroke: #5b7790; stroke-width: 2; }
+.it-sep { stroke: #34495b; stroke-width: 1.5; }
+.it-pocket { fill: #111a23; stroke: #4a6378; stroke-width: 1.5; }
+.it-num { fill: #7c90a3; font-size: 11px; }
+.it-step { fill: #e4edf5; font-size: 15px; font-weight: 700; }
+.it-pointer { fill: #f1b84b; }
+.it-plate g.active .it-pocket { fill: #1f6f52; stroke: #3cce80; }
+.index-table-ui.running .it-base { stroke: #3cce80; }
+.index-table-ui.running { filter: drop-shadow(0 0 10px #34d39955); }
+.index-table-ui .it-badge { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 2px; font-size: 10px; letter-spacing: .06em; color: #91a4b5; }
+.index-table-ui.moving .it-badge { color: #f1b84b; }
+.index-table-ui .tag { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); white-space: nowrap; }
+
+/* Dialogs launched from an expanded Inspector workspace must appear above
+   the workspace overlay. Otherwise Import DB Tags and Select PLC Address
+   are trapped underneath the pop-out (z-index 10000). */
+.modal-overlay { z-index: 20000; }
+
+/* PLC Mapping workspace: more room for signal/address editing and a quick coverage summary. */
+.mapping-workspace-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(100px, 1fr));
+  gap: 10px;
+  margin: 14px 14px 4px;
+}
+.mapping-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid #2b4051;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #172633, #121c26);
+}
+.mapping-summary-card span { color: #8da3b5; font-size: 11px; font-weight: 600; }
+.mapping-summary-card strong { color: #e5eef6; font-size: 23px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.mapping-workspace-summary.mapping-has-unmapped .mapping-summary-card:last-of-type strong { color: #f0bd65; }
+.mapping-workspace-summary p { grid-column: 1 / -1; margin: 0 0 4px; color: #91a4b5; font-size: 12px; }
+.mapping-workspace-window { width: min(1680px, 100%); }
+.mapping-workspace-window .sequence-editor-modal-body { padding: 18px clamp(14px, 2vw, 30px) 28px; }
+.mapping-workspace-window #plc-tab { max-width: 1500px; margin: 0 auto; }
+.mapping-workspace-window #mapping-table-wrap { margin-top: 14px; }
+.mapping-workspace-window .mapping-table-head,
+.mapping-workspace-window .mapping-card { grid-template-columns: minmax(220px, 1.2fr) minmax(260px, 1.3fr) minmax(100px, .45fr) minmax(120px, .55fr); gap: 12px; }
+.mapping-workspace-window .mapping-table-head { position: sticky; top: 0; z-index: 2; padding: 10px 14px; font-size: 10px; }
+.mapping-workspace-window .mapping-card { padding: 9px 14px; min-height: 48px; }
+.mapping-workspace-window .mapping-actions { padding: 14px 14px 10px; }
+.mapping-workspace-window #mapping-filter { margin: 8px 14px 0; width: calc(100% - 28px); box-sizing: border-box; }
+.mapping-workspace-window .mapping-group-controls { margin: 8px 14px; }
+.panel-popout-subtitle { margin: 4px 0 0; color: #91a4b5; font-size: 12px; }
+@media (max-width: 760px) {
+  .mapping-workspace-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 10px 8px 4px; }
+  .mapping-summary-card { padding: 9px; }
+  .mapping-summary-card span { font-size: 10px; }
+  .mapping-summary-card strong { font-size: 19px; }
+  .mapping-workspace-window .mapping-table-head { display: none; }
+  .mapping-workspace-window .mapping-card { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+}
+
+
+/* Dedicated Logic Editor workspace: keep the Inspector launch card compact. */
+#logic-tab .logic-editor-content { display: none; }
+#logic-tab.logic-workspace-active .logic-editor-content { display: block; }
+#logic-tab .logic-launch-card { margin: 18px 10px; }
+.logic-launch-card .sequence-launch-icon { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.logic-workspace-window { width: min(1560px, 100%); }
+.logic-workspace-window .sequence-editor-modal-body { padding: 22px clamp(16px, 2.2vw, 34px) 30px; }
+.logic-workspace-window #logic-tab { max-width: 1420px; margin: 0 auto; }
+.logic-workspace-window #logic-launch-card { display: none; }
+.logic-workspace-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 4px 4px 18px; border-bottom: 1px solid #263746; }
+.logic-workspace-intro h3 { margin: 5px 0 6px; color: #e4edf5; font-size: 22px; }
+.logic-workspace-intro p { max-width: 640px; margin: 0; color: #91a4b5; font-size: 12px; line-height: 1.55; }
+.logic-workspace-kicker { color: #7eb8e7; font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+.logic-workspace-summary { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.logic-workspace-summary span { display: flex; align-items: baseline; gap: 6px; padding: 9px 11px; border: 1px solid #2b4051; border-radius: 7px; background: #14212c; color: #91a4b5; font-size: 11px; white-space: nowrap; }
+.logic-workspace-summary strong { color: #e4edf5; font-size: 17px; font-variant-numeric: tabular-nums; }
+.logic-workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 16px 4px 4px; }
+.logic-workspace-actions button { min-height: 36px; padding: 8px 13px; }
+.logic-workspace-window .logic-rule { margin: 10px 0; padding: 40px 18px 16px; gap: 12px; }
+.logic-workspace-window .logic-rule-row { display: grid; grid-template-columns: 76px minmax(200px, 1.3fr) minmax(130px, .7fr) minmax(100px, .5fr) auto; gap: 10px; }
+.logic-workspace-window .logic-rule-then { grid-template-columns: 76px minmax(200px, 1.3fr) minmax(100px, .6fr) minmax(100px, .6fr); }
+.logic-workspace-window .logic-rule-row select { width: 100%; min-width: 0; box-sizing: border-box; }
+.logic-workspace-window .logic-rule .logic-value { width: 100%; min-width: 0; box-sizing: border-box; }
+.logic-workspace-window .logic-rule input[type="text"] { box-sizing: border-box; }
+@media (max-width: 900px) {
+  .logic-workspace-intro { align-items: stretch; flex-direction: column; }
+  .logic-workspace-summary { justify-content: flex-start; }
+  .logic-workspace-window .logic-rule-row,
+  .logic-workspace-window .logic-rule-then { grid-template-columns: 76px minmax(0, 1fr); }
+  .logic-workspace-window .logic-rule-row > * { min-width: 0; }
+}
+
+/* Logic Editor live condition monitor */
+.logic-live-panel { margin: 18px 0 22px; padding: 16px; border: 1px solid var(--border, #d9dee7); border-radius: 12px; background: var(--panel-bg, rgba(127,127,127,.035)); }
+.logic-live-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.logic-live-heading h4 { margin:0 0 4px; font-size:15px; }
+.logic-live-heading p { margin:0; color:var(--muted, #78808d); font-size:12px; }
+#logic-monitor-summary { flex:0 0 auto; font-size:12px; font-weight:600; color:var(--muted, #78808d); }
+.logic-monitor-table-wrap { overflow-x:auto; }
+.logic-monitor-table { width:100%; border-collapse:collapse; font-size:12px; min-width:650px; }
+.logic-monitor-table th,.logic-monitor-table td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--border, #d9dee7); white-space:nowrap; }
+.logic-monitor-table th { color:var(--muted, #78808d); font-size:10px; letter-spacing:.05em; text-transform:uppercase; }
+.logic-monitor-table tbody tr:last-child td { border-bottom:0; }
+.logic-monitor-table code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.logic-status-pill { display:inline-flex; align-items:center; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:650; }
+.logic-status-pill.is-true { color:#147a4b; background:rgba(30,170,100,.13); }
+.logic-status-pill.is-false { color:#a55b16; background:rgba(230,150,45,.14); }
+.logic-status-pill.is-disabled { color:var(--muted, #78808d); background:rgba(127,127,127,.12); }
+.logic-status-pill.is-unknown { color:#6476a5; background:rgba(100,125,190,.13); }
+.logic-rule-if .logic-condition-preset { max-width:135px; }
+@media (max-width:760px) { .logic-live-panel { padding:11px; } .logic-live-heading { flex-direction:column; gap:8px; } }
+
+
+/* Machine-first 3D viewport */
+.machine-3d-view { position:absolute; inset:0; z-index:20; overflow:hidden; background:radial-gradient(ellipse at 50% 28%, #253849 0%, #111a24 72%); color:#e5edf5; }
+.machine-3d-view[hidden] { display:none; }
+#machine-3d-stage { position:absolute; inset:42px 0 28px; }
+#machine-3d-stage canvas { display:block; width:100%; height:100%; outline:none; }
+.machine-3d-toolbar { position:absolute; z-index:2; top:0; left:0; right:0; min-height:42px; display:flex; align-items:center; gap:16px; padding:0 14px; background:#0d151ee8; border-bottom:1px solid #405365; font-size:12px; }
+.machine-3d-toolbar strong { letter-spacing:.12em; }
+.machine-3d-toolbar span { color:#a9bacb; flex:1; }
+.machine-3d-toolbar button { background:#263746; color:#e5edf5; border:1px solid #50677a; border-radius:4px; padding:5px 9px; cursor:pointer; }
+.machine-3d-legend { position:absolute; z-index:2; bottom:0; left:0; right:0; padding:7px 14px; color:#9eb0c1; background:#0d151ee8; border-top:1px solid #405365; font-size:11px; }
+
+/* Drag palette components directly into the 3D machine workspace. */
+#machine-3d-stage { transition: outline-color .12s ease, background-color .12s ease; }
+#machine-3d-stage.drag-over { outline: 2px dashed #58b6f2; outline-offset: -5px; background-color: #2a739022; }
+#machine-3d-stage.drag-over::after { content: "DROP COMPONENT TO ADD TO MACHINE"; position: absolute; z-index: 5; top: 50%; left: 50%; transform: translate(-50%,-50%); padding: 12px 18px; border: 1px solid #58b6f2; border-radius: 6px; background: #102334e8; color: #eaf7ff; font-size: 12px; font-weight: 700; letter-spacing: .08em; pointer-events: none; }

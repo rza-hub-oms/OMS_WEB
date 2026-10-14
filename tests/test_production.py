@@ -51,3 +51,20 @@ def test_production_missing_optional_tags_do_not_break():
     tracker.configure({"production_trigger": "done", "reject_trigger": "missing", "running_tag": "run"})
     tracker.tick({"done": False}.get, 1.0)
     assert tracker.snapshot()["total_count"] == 0
+
+
+def test_production_snapshot_includes_reject_rate():
+    values = {"done": False, "reject": False}
+    tracker = ProductionTracker()
+    tracker.configure({"production_trigger": "done", "reject_trigger": "reject"})
+    values["done"] = True
+    tracker.tick(values.get, 0.05)
+    values["done"] = False
+    tracker.tick(values.get, 0.05)
+    values["done"] = True
+    values["reject"] = True
+    tracker.tick(values.get, 0.05)
+    snap = tracker.snapshot()
+    assert snap["total_count"] == 2
+    assert snap["reject_count"] == 1
+    assert snap["reject_rate"] == 0.5

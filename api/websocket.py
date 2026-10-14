@@ -200,11 +200,24 @@ async def websocket_endpoint(ws: WebSocket):
                     session.mode = requested_mode
                     continue
                 elif action == "set_point":
+                    # UI simulation controls are intentionally unavailable in
+                    # Design and Runtime. Runtime outputs must go through PLC.
+                    if session.mode == "runtime":
+                        continue
                     session.scene.apply_command(
                         command["tag_name"],
                         command["point"],
                         command["value"],
                     )
+                elif action == "set_sensor_input":
+                    # Sensor forcing is a virtual-commissioning feature only;
+                    # it must never override live PLC feedback in Runtime.
+                    if session.mode != "simulation":
+                        continue
+                    sensor = session.scene.objects.get(command.get("tag_name"))
+                    setter = getattr(sensor, "set_input_override", None)
+                    if setter is not None:
+                        setter(command.get("value"))
                 elif action == "set_trend_tags":
                     session.trend_recorder.configure(command.get("tags", []))
                 elif action == "clear_trends":
@@ -446,6 +459,8 @@ async def websocket_endpoint(ws: WebSocket):
                         session.scene.sequence_engine.stop(command.get("sequence_id"))
                     elif command_name == "start":
                         session.scene.sequence_engine.start(command.get("sequence_id"))
+                    elif command_name == "recover":
+                        session.scene.sequence_engine.recover(command.get("sequence_id"))
 
                 elif action == "set_alarms":
                     if session.mode != "design":

@@ -30,6 +30,10 @@ class MotorBehavior(SimObject):
         self.speed = self.DEFAULT_SPEED
         self.running = False
         self.direction_forward = True
+        # Simulation-only load model. Current is an estimated value for
+        # trends/alarms/PLC testing, not a measurement from real hardware.
+        self.load_percent = 100.0
+        self.nominal_current_a = 10.0
 
         self._rotation_phase = 0.0
 
@@ -109,7 +113,23 @@ class MotorBehavior(SimObject):
         return self.running
 
     def get_running_status(self):
-        return int(self.running)
+        # Separate the requested run command from the effective machine state.
+        return int(self.running and not self.is_safety_blocked())
+
+    def set_load_percent(self, value):
+        self.load_percent = max(0.0, min(100.0, float(value)))
+
+    def get_load_percent(self):
+        return self.load_percent
+
+    def get_current(self):
+        """Return a deterministic simulated motor current in amperes."""
+        if not self.running or self.is_safety_blocked() or self.speed <= 0:
+            return 0.0
+        speed_fraction = min(1.0, self.speed / self.MAX_SPEED)
+        # Small magnetising current plus load-dependent operating current.
+        return round(self.nominal_current_a * speed_fraction *
+                     (0.08 + 0.92 * self.load_percent / 100.0), 3)
 
     # ------------------------------------------------------------------
     # Simulation
@@ -144,6 +164,7 @@ class MotorBehavior(SimObject):
             Signal("speed", self.get_speed, self.set_speed, float, "Motor speed"),
             Signal("running", self.get_running, self.set_running, bool, "Run command"),
             Signal("running_status", self.get_running_status, None, int, "Motor running status"),
+            Signal("current", self.get_current, None, float, "Simulated motor current (A)"),
             Signal("direction", self.get_direction, self.set_direction, bool, "Forward direction command"),
         ]
 
@@ -152,6 +173,7 @@ class MotorBehavior(SimObject):
             "speed": (self.get_speed, self.set_speed),
             "running": (self.get_running, self.set_running),
             "running_status": (self.get_running_status, None),
+            "current": (self.get_current, None),
             "direction": (self.get_direction, self.set_direction),
                     "mode": (self.get_mode, self.set_mode),
             "fault": (self.get_fault, self.set_fault),
@@ -182,6 +204,8 @@ class MotorBehavior(SimObject):
             "direction_forward": self.direction_forward,
 
             "running_status": self.get_running_status(),
+            "current": self.get_current(),
+            "load_percent": self.load_percent,
             "rotation_phase": self._rotation_phase,
 
             "_io_points": {

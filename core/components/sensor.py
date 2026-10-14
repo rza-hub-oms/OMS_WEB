@@ -37,6 +37,9 @@ class SensorBehavior(SimObject):
 
         # Runtime state
         self.detected = False
+        # Optional simulation-only override: None follows physical detection,
+        # True forces the sensor active, False forces it inactive.
+        self.input_override = None
 
         # Design-time configuration
         self.mode = self.DEFAULT_MODE
@@ -85,7 +88,22 @@ class SensorBehavior(SimObject):
     # ---------- Runtime detection ----------
 
     def set_detected(self, value):
+        # Scene physics can continue updating its calculated value while a
+        # simulation override is active; the effective output is resolved in
+        # get_detected().
         self.detected = bool(value)
+
+    def set_input_override(self, value):
+        """Set a virtual input override (None means physical/automatic mode)."""
+        if value is None or (isinstance(value, str) and value.strip().lower() in {"", "auto", "none", "null"}):
+            self.input_override = None
+        elif isinstance(value, str):
+            self.input_override = value.strip().lower() in {"1", "true", "on", "yes"}
+        else:
+            self.input_override = bool(value)
+
+    def get_input_override(self):
+        return self.input_override
 
     def get_detected(self):
         """
@@ -99,10 +117,11 @@ class SensorBehavior(SimObject):
             1 = nothing detected
             0 = object detected
         """
+        physical_detected = self.detected if self.input_override is None else self.input_override
         if self.mode == self.NORMALLY_CLOSED:
-            return not self.detected
+            return not physical_detected
 
-        return self.detected
+        return physical_detected
 
     # ---------- Simulation ----------
 
@@ -142,6 +161,7 @@ class SensorBehavior(SimObject):
             "detected": self.get_detected(),
             "mode": self.mode,
             "watch_tag": self.watch_tag,
+            "input_override": self.input_override,
 
             "_io_points": {
                 point_name: setter is not None

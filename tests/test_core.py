@@ -391,6 +391,29 @@ class SequenceEngineTests(unittest.TestCase):
         self.assertEqual(scene.sequence_engine.last_status[0]["status"], "fault")
         self.assertIn("Timeout", scene.sequence_engine.last_status[0]["fault"])
 
+    def test_sequence_fault_executes_fail_safe_and_requires_recovery_then_start(self):
+        scene, button, motor = self._scene()
+        motor.set_running(True)
+        scene.sequences = [{
+            "id": "fault_seq", "name": "Fault sequence", "enabled": True,
+            "auto_start": True, "steps": [{
+                "name": "Wait forever", "actions": [],
+                "transition": {"object_tag": "Start", "io_point": "pressed_signal", "operator": "truthy"},
+                "timeout_ms": 100, "on_timeout": "fault",
+                "on_fault_actions": [{"destination": {"object_tag": "Motor", "io_point": "running"}, "value": False}],
+            }],
+        }]
+        scene.tick(0.05, simulate=True, logic_enabled=True)
+        scene.tick(0.10, simulate=True, logic_enabled=True)
+        self.assertFalse(motor.running)
+        self.assertEqual(scene.sequence_engine.last_status[0]["status"], "fault")
+        scene.sequence_engine.recover("fault_seq")
+        scene.tick(0.05, simulate=True, logic_enabled=True)
+        self.assertEqual(scene.sequence_engine.last_status[0]["status"], "stopped")
+        scene.sequence_engine.start("fault_seq")
+        scene.tick(0.05, simulate=True, logic_enabled=True)
+        self.assertEqual(scene.sequence_engine.last_status[0]["status"], "running")
+
     def test_sequence_round_trip_and_migration(self):
         scene, button, motor = self._scene()
         scene.sequences = [{"id": "seq1", "steps": [{"name": "A", "actions": []}]}]
@@ -640,3 +663,64 @@ class HierarchyTests(unittest.TestCase):
         self.assertTrue(scene.set_parent("Sensor_1", None))
         roots = {node["tag_name"] for node in scene.hierarchy()}
         self.assertEqual(roots, {"Conveyor_1", "Sensor_1"})
+
+
+class EffectiveSafetyStatusTests(unittest.TestCase):
+    def test_conveyor_running_status_is_false_when_faulted_or_estopped(self):
+        conveyor = ConveyorBehavior("Conveyor_1")
+        conveyor.set_running(True)
+        self.assertEqual(conveyor.get_running_status(), 1)
+        conveyor.set_fault(True)
+        self.assertEqual(conveyor.get_running_status(), 0)
+        conveyor.set_fault(False)
+        conveyor.set_emergency_stop(True)
+        self.assertEqual(conveyor.get_running_status(), 0)
+
+    def test_motor_running_status_is_false_when_safety_blocked(self):
+        motor = MotorBehavior("Motor_1")
+        motor.set_running(True)
+        self.assertEqual(motor.get_running_status(), 1)
+        motor.set_emergency_stop(True)
+        self.assertEqual(motor.get_running_status(), 0)
+
+    def test_motor_current_is_simulated_and_safety_aware(self):
+        motor = MotorBehavior("Motor_1")
+        motor.set_speed(5000)
+        motor.set_running(True)
+        motor.set_load_percent(50)
+        self.assertGreater(motor.get_current(), 0)
+        loaded_current = motor.get_current()
+        motor.set_load_percent(100)
+        self.assertGreater(motor.get_current(), loaded_current)
+        motor.set_fault(True)
+        self.assertEqual(motor.get_current(), 0.0)
+
+class SensorSimulationInputTests(unittest.TestCase):
+    def test_sensor_override_forces_input_and_auto_restores_physical_detection(self):
+        sensor = SensorBehavior("Sensor_1")
+        sensor.set_detected(False)
+        sensor.set_input_override(True)
+        self.assertTrue(sensor.get_detected())
+        # Physical updates continue underneath the override.
+        sensor.set_detected(False)
+        self.assertTrue(sensor.get_detected())
+        sensor.set_input_override(None)
+        self.assertFalse(sensor.get_detected())
+
+    def test_sensor_override_respects_normally_closed_electrical_mode(self):
+        sensor = SensorBehavior("Sensor_1")
+        sensor.set_mode("NC")
+        sensor.set_input_override(True)
+        self.assertFalse(sensor.get_detected())
+        sensor.set_input_override(False)
+        self.assertTrue(sensor.get_detected())
+
+    def test_sensor_override_survives_project_round_trip(self):
+        scene = Scene()
+        sensor = scene.create_component("sensor", 10, 20)
+        sensor.set_input_override(True)
+        payload = scene_to_project_dict(scene)
+        loaded = Scene()
+        load_project_dict(loaded, payload)
+        self.assertTrue(loaded.objects[sensor.tag_name].get_detected())
+        self.assertIs(loaded.objects[sensor.tag_name].get_input_override(), True)

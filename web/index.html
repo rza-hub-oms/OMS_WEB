@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>OMS Web Prototype</title>
-  <link rel="stylesheet" href="styles.css?v=12" />
+  <link rel="stylesheet" href="styles.css?v=15" />
 </head>
 <body>
   <h1>OMS Web Prototype</h1>
@@ -76,7 +76,6 @@
       <button type="button" id="save-as-project-btn" class="mode-btn">Save As</button>
       <button type="button" id="open-project-btn" class="mode-btn">Open</button>
       <input type="file" id="open-project-input" accept=".oms" style="display:none">
-      <span id="current-file-name" class="current-file-name">Untitled</span>
       <span id="dirty-indicator" class="dirty-indicator hidden">*</span>
     </div>
 
@@ -87,6 +86,7 @@
       <button type="button" id="undo-btn" class="mode-btn icon-btn-toolbar" title="Undo">↶</button>
       <button type="button" id="redo-btn" class="mode-btn icon-btn-toolbar" title="Redo">↷</button>
       <button type="button" id="reset-view-btn" class="mode-btn">Reset View</button>
+      <button type="button" id="machine-3d-toggle" class="mode-btn" aria-pressed="false">3D Machine View</button>
     </div>
 
     <div id="mode-description">
@@ -248,6 +248,7 @@
         <button draggable="true" data-type="emergency_push_button">Emergency PB</button>
         <button draggable="true" data-type="toggle_switch">Toggle switch</button>
         <button draggable="true" data-type="tower_light">Tower light</button>
+        <button draggable="true" data-type="index_table">Index table</button>
         <button draggable="true" data-type="label">Label</button>
       </div>
     </aside>
@@ -255,6 +256,7 @@
     <div id="canvas-wrap">
       <div id="canvas-viewport">
         <div id="canvas"><svg id="connections-layer" aria-hidden="true"></svg></div>
+        <div id="machine-3d-view" class="machine-3d-view" hidden><div class="machine-3d-toolbar"><strong>3D MACHINE VIEW</strong><span id="machine-3d-status">Initializing 3D engine…</span><button type="button" id="machine-3d-home">Reset camera</button></div><div id="machine-3d-stage"></div><div class="machine-3d-legend">Conveyor · Motor · Cylinder · Sensor · Index table · Controls</div></div>
       </div>
     </div>
 
@@ -262,6 +264,7 @@
       <div class="panel-title">INSPECTOR<button type="button" id="panel-fullscreen-close" class="dashboard-close panel-fullscreen-close">Back</button></div>
 
       <div class="tabs">
+        <button type="button" id="tab-popout-btn" class="tab-popout-btn" title="Open this section in a large window">Pop out ↗</button>
         <button type="button" class="tab active" data-tab="properties">Properties</button>
         <button type="button" class="tab" data-tab="plc">PLC Mapping</button>
         <button type="button" class="tab" data-tab="logic">Logic</button>
@@ -283,6 +286,12 @@
       </div>
 
       <div id="plc-tab" class="tab-panel" data-panel="plc">
+        <div id="mapping-workspace-summary" class="mapping-workspace-summary" aria-live="polite">
+          <div class="mapping-summary-card"><span>Available signals</span><strong id="mapping-summary-total">0</strong></div>
+          <div class="mapping-summary-card"><span>Mapped addresses</span><strong id="mapping-summary-mapped">0</strong></div>
+          <div class="mapping-summary-card"><span>Needs mapping</span><strong id="mapping-summary-unmapped">0</strong></div>
+          <p>Assign PLC addresses, inspect live values, and validate the mapping before connecting to hardware.</p>
+        </div>
         <div class="mapping-actions">
           <button id="mapping-rescan-btn" title="Rescan Scene">🔄</button>
           <button id="mapping-validate-btn" title="Validate Mappings">✓</button>
@@ -316,22 +325,52 @@
         </div>
       </div>
       <div id="logic-tab" class="tab-panel" data-panel="logic">
-        <div class="mapping-actions">
-          <button id="logic-add-btn" title="Add Rule">＋</button>
-          <button id="logic-validate-btn" title="Validate Rules">✓</button>
+        <div id="logic-launch-card" class="sequence-launch-card logic-launch-card">
+          <div class="sequence-launch-icon">⌘</div>
+          <h3>Logic Editor</h3>
+          <p>Build and validate simulation rules in a dedicated workspace. Define an IF condition and the output to set when it matches.</p>
+          <button type="button" id="logic-editor-open" class="apply">Open Logic Editor ↗</button>
+          <div class="sequence-launch-stats"><span id="logic-launch-count">0 rules</span><span id="logic-launch-enabled">0 enabled</span></div>
         </div>
-        <p class="hint">Simulation only. Example: Sensor detected → Cylinder extend.</p>
-        <div id="logic-rules-list" class="mapping-card-list"></div>
+        <div id="logic-editor-content" class="logic-editor-content">
+          <div class="logic-workspace-intro">
+            <div><span class="logic-workspace-kicker">SIMULATION AUTOMATION</span><h3>Rules</h3><p>Each rule evaluates an input condition and sets an output. Rules execute in simulation; validate them before running.</p></div>
+            <div class="logic-workspace-summary"><span><strong id="logic-workspace-total">0</strong> Total rules</span><span><strong id="logic-workspace-active">0</strong> Enabled</span><span><strong id="logic-workspace-io">0</strong> Readable I/O</span></div>
+          </div>
+          <div class="mapping-actions logic-workspace-actions">
+            <button id="logic-add-btn" class="apply" title="Add Rule">＋ Add Rule</button>
+            <button id="logic-validate-btn" title="Validate Rules">✓ Validate Rules</button>
+          </div>
+          <p class="hint">Simulation only. Example: Sensor detected → Cylinder extend. Use a delay to debounce an input or delay an action.</p>
+          <section class="logic-live-panel" aria-live="polite">
+            <div class="logic-live-heading"><div><h4>Live rule monitor</h4><p>Current values and condition checks from the running simulation.</p></div><span id="logic-monitor-summary">Waiting for I/O</span></div>
+            <div id="logic-live-monitor"><p class="empty">Add a rule and start the simulation to monitor its condition.</p></div>
+          </section>
+          <div id="logic-rules-list" class="mapping-card-list"></div>
+        </div>
       </div>
       <div id="sequences-tab" class="tab-panel" data-panel="sequences">
-        <div class="mapping-actions">
+        <div class="sequence-launch-card">
+          <div class="sequence-launch-icon">⇄</div>
+          <h3>Sequence Editor</h3>
+          <p>Build, validate and operate machine sequences in a dedicated workspace with more room for steps and controls.</p>
+          <button type="button" id="sequence-editor-open" class="apply">Open Sequence Editor ↗</button>
+          <div class="sequence-launch-stats"><span id="sequence-launch-count">0 sequences</span><span id="sequence-launch-state">Simulation logic</span></div>
+        </div>
+        <div id="sequence-editor-content">
+        <div class="mapping-actions sequence-actions">
           <button id="sequence-add-btn" title="Add Sequence">＋</button>
+          <button id="sequence-demo-btn" title="Create a sensor-to-conveyor demo sequence">Sensor → Conveyor Demo</button>
+          <button id="sequence-machine-cycle-btn" title="Create a complete conveyor, cylinder and motor cycle">Full Machine Cycle</button>
           <button id="sequence-validate-btn" title="Validate Sequences">✓</button>
-          <button id="sequence-reset-btn" title="Reset sequence runtime">↺</button>
+          <button id="sequence-start-btn" title="Start or restart sequences after recovery">▶ Start</button>
+          <button id="sequence-recover-btn" title="Acknowledge sequence faults and hold stopped">Recover Fault</button>
+          <button id="sequence-reset-btn" title="Reset sequence runtime">↺ Reset</button>
         </div>
         <p class="hint">Simulation only. Each step executes its actions, then advances when its transition becomes true. Timeouts can fault, stop, or advance.</p>
         <div id="sequence-list" class="mapping-card-list"></div>
         <div id="sequence-status-list" class="mapping-card-list"></div>
+        </div>
       </div>
       <div id="monitor-tab" class="tab-panel" data-panel="monitor">
         <div class="monitor-summary">
@@ -434,6 +473,7 @@
           <div class="production-kpi"><span>Good</span><b id="production-good">0</b></div>
           <div class="production-kpi"><span>Reject</span><b id="production-reject">0</b></div>
           <div class="production-kpi"><span>Last Cycle</span><b id="production-cycle">—</b></div>
+          <div class="production-kpi"><span>Reject Rate</span><b id="production-reject-rate">0.0%</b></div>
         </div>
         <div class="production-oee-grid">
           <div><span>Availability</span><b id="production-availability">0.0%</b></div>
@@ -614,6 +654,26 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20"></script>
+  <div id="sequence-editor-overlay" class="sequence-editor-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="sequence-editor-title">
+    <div class="sequence-editor-window">
+      <header class="sequence-editor-header">
+        <div><div class="sequence-editor-eyebrow">OMS ENGINEERING WORKSPACE</div><h2 id="sequence-editor-title">Sequence Editor</h2><p>Configure steps, conditions, timeouts and recovery actions.</p></div>
+        <button type="button" id="sequence-editor-close" class="sequence-editor-close" aria-label="Close sequence editor">✕ <span>Close</span></button>
+      </header>
+      <div id="sequence-editor-modal-body" class="sequence-editor-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="panel-popout-overlay" class="sequence-editor-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="panel-popout-title">
+    <div class="sequence-editor-window">
+      <header class="sequence-editor-header">
+        <div><div class="sequence-editor-eyebrow">OMS ENGINEERING WORKSPACE</div><h2 id="panel-popout-title">Section</h2><p id="panel-popout-subtitle" class="panel-popout-subtitle">Expanded engineering view.</p></div>
+        <button type="button" id="panel-popout-close" class="sequence-editor-close" aria-label="Close">✕ <span>Close</span></button>
+      </header>
+      <div id="panel-popout-body" class="sequence-editor-modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js?v=30"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ import { send, setMessageHandler } from "./modules/socket.js";
 import { renderConveyor } from "./modules/conveyor-renderer.js";
 import { renderCylinder } from "./modules/cylinder-renderer.js";
 import { renderMotor } from "./modules/motor-renderer.js";
+import { renderIndexTable } from "./modules/index-table-renderer.js";
 import { renderSensor } from "./modules/sensor-renderer.js";
 import { renderPushButton } from "./modules/push-button-renderer.js";
 import { renderEmergencyPushButton } from "./modules/emergency-push-button-renderer.js";
@@ -19,6 +20,9 @@ const canvasViewport = document.getElementById("canvas-viewport");
 const palette = document.getElementById("palette");
 
 let simulationZoom = 1;
+let machine3d = null;
+let machine3dEnabled = false;
+let machine3dLoadPromise = null;
 
 let simulationPanX = 0;
 let simulationPanY = 0;
@@ -122,13 +126,15 @@ function markClean() {
 
 function updateDirtyUI() {
   document.getElementById("dirty-indicator").classList.toggle("hidden", !projectDirty);
-  document.title = (projectDirty ? "* " : "") + "OMS Web Prototype";
+  document.title = (projectDirty ? "* " : "") + (currentProjectFilename ? `${currentProjectFilename} - ` : "") + "OMS Web Prototype";
   updateRecoveryUI();
 }
 
 function updateFileNameUI() {
-  document.getElementById("current-file-name").textContent =
-    currentProjectFilename || "Untitled";
+  const name = currentProjectFilename || "Untitled";
+  const h1 = document.querySelector("body > h1");
+  if (h1) h1.textContent = `OMS Web Prototype — ${name}`;
+  updateDirtyUI();
 }
 
 const designModeBtn = document.getElementById("design-mode-btn");
@@ -463,6 +469,18 @@ const PROPERTY_FIELDS = {
     { key: "height", send: "height", label: "Height", type: "number", min: 30, max: 1000, suffix: " px" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
+  index_table: [
+    { key: "mode", send: "mode", label: "Mode", type: "select", options: [["auto", "Auto"], ["manual", "Manual"]] },
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Diameter", type: "number", min: 60, max: 1000, suffix: " px" },
+    { key: "stations", send: "stations", label: "Number of Clocks (Stations)", type: "number", min: 2, max: 24, step: "1" },
+    { key: "dwell_ms", send: "dwell_ms", label: "Dwell Time", type: "number", min: 0, max: 60000, step: "50", suffix: " ms" },
+    { key: "move_ms", send: "move_ms", label: "Index Move Time", type: "number", min: 50, max: 10000, step: "50", suffix: " ms" },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+    { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
+    { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
+  ],
   label: [
     { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
@@ -480,10 +498,11 @@ const PROPERTY_FIELDS = {
 
 // Read-only telemetry shown above the editable fields.
 const STATUS_FIELDS = {
-  conveyor: [["running", "Running"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
+  conveyor: [["running", "Run Command"], ["running_status", "Effective Running"], ["speed", "Speed"], ["direction_forward", "Forward Direction"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   cylinder: [["extended", "Extended"], ["progress", "Progress"], ["moving", "Moving"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
-  motor: [["running", "Running"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
-  sensor: [["detected", "Detected"]],
+  motor: [["running", "Run Command"], ["running_status", "Effective Running"], ["speed", "Speed"], ["current", "Current (A)"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
+  index_table: [["running", "Run Command"], ["running_status", "Effective Running"], ["step", "Current Step"], ["stations", "Clocks"], ["moving", "Indexing"], ["in_position", "In Position"], ["cycle_count", "Revolutions"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
+  sensor: [["detected", "Detected"], ["input_override", "Simulation Input Override"]],
   push_button: [["pressed", "Pressed"]],
   emergency_push_button: [["pressed", "Pressed"]],
   toggle_switch: [["on", "On"]],
@@ -540,6 +559,44 @@ function deselectAll() {
   for (const el of Object.values(elements)) el.classList.remove("selected");
   renderPropertyPanel();
   renderComponentsList(latestState);
+}
+
+function buildSimulationControls(obj) {
+  const button = (label, point, value, extra = "") =>
+    `<button type="button" class="sim-control ${extra}" data-sim-point="${point}" data-sim-value="${value}">${label}</button>`;
+  let controls = [];
+
+  if (obj.type === "index_table") {
+    controls.push(button("▶ Start", "running", "1", "sim-start"));
+    controls.push(button("■ Stop", "running", "0", "sim-stop"));
+    controls.push(`<button type="button" class="sim-control" data-sim-point="index" data-sim-value="1">Step ▸</button>`);
+  } else if (obj.type === "conveyor" || obj.type === "motor") {
+    controls.push(button("▶ Start", "running", "1", "sim-start"));
+    controls.push(button("■ Stop", "running", "0", "sim-stop"));
+    controls.push(button("Forward", "direction", "1"));
+    controls.push(button("Reverse", "direction", "0"));
+  } else if (obj.type === "sensor") {
+    controls.push(`<button type="button" class="sim-control sim-start" data-sensor-input="1">Force ON</button>`);
+    controls.push(`<button type="button" class="sim-control sim-stop" data-sensor-input="0">Force OFF</button>`);
+    controls.push(`<button type="button" class="sim-control" data-sensor-input="auto">Auto / Physical</button>`);
+  } else if (obj.type === "cylinder") {
+    if (obj.valve_type === "dual") {
+      controls.push(`<button type="button" class="sim-control sim-start" data-sim-action="extend">Extend</button>`);
+      controls.push(`<button type="button" class="sim-control" data-sim-action="retract">Retract</button>`);
+      controls.push(`<button type="button" class="sim-control sim-stop" data-sim-action="hold">Hold / Stop</button>`);
+    } else {
+      controls.push(button("Extend", "extend", "1", "sim-start"));
+      controls.push(button("Retract", "extend", "0"));
+    }
+  } else {
+    return "";
+  }
+
+  return `<section class="simulation-controls">
+    <div class="simulation-controls-heading">Simulation Controls</div>
+    <div class="simulation-controls-buttons">${controls.join("")}</div>
+    <p class="simulation-controls-note">Commands affect the virtual component only. Runtime PLC commands use the configured PLC mapping.</p>
+  </section>`;
 }
 
 function renderPropertyPanel() {
@@ -623,11 +680,16 @@ function renderPropertyPanel() {
     .map(tag => `<option value="${escapeHtml(tag)}" ${obj.parent_tag === tag ? "selected" : ""}>${escapeHtml(tag)}</option>`)
     .join("");
 
+  const simulationControlsHtml = isSimulationMode()
+    ? buildSimulationControls(obj)
+    : "";
+
   propertyBody.innerHTML = `
     <div class="selected-name">
       <input id="name-input" type="text" value="${selectedTag}">
     </div>
     <div id="status-block">${statusHtml}</div>
+    ${simulationControlsHtml}
     <form id="property-form">
       <label>Machine Parent
         <select data-send="parent_tag">
@@ -653,6 +715,37 @@ function renderPropertyPanel() {
       }
     </form>
   `;
+
+  propertyBody.querySelectorAll("[data-sim-point]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isSimulationMode() || !selectedTag) return;
+      sendSetPoint(selectedTag, button.dataset.simPoint, button.dataset.simValue);
+    });
+  });
+  propertyBody.querySelectorAll("[data-sensor-input]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isSimulationMode() || !selectedTag) return;
+      const raw = button.dataset.sensorInput;
+      const value = raw === "auto" ? null : raw === "1";
+      send({ action: "set_sensor_input", tag_name: selectedTag, value });
+    });
+  });
+  propertyBody.querySelectorAll("[data-sim-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isSimulationMode() || !selectedTag) return;
+      const action = button.dataset.simAction;
+      if (action === "extend") {
+        sendSetPoint(selectedTag, "extend_command", "1");
+        sendSetPoint(selectedTag, "retract_command", "0");
+      } else if (action === "retract") {
+        sendSetPoint(selectedTag, "extend_command", "0");
+        sendSetPoint(selectedTag, "retract_command", "1");
+      } else if (action === "hold") {
+        sendSetPoint(selectedTag, "extend_command", "0");
+        sendSetPoint(selectedTag, "retract_command", "0");
+      }
+    });
+  });
 
   if (!isDesignMode()) {
     propertyBody
@@ -769,7 +862,7 @@ setMessageHandler((event) => {
       lastServerMetadata = project.metadata;
       latestProjectMetadata = project.metadata; loadOperatorScreensFromMetadata(latestProjectMetadata); renderRuntimeScreenBar();
     }
-    if (project.name) { currentProjectFilename = project.name; updateFileNameUI(); }
+    if (project.name && project.name !== "Untitled" && !currentProjectFilename) { currentProjectFilename = project.name; updateFileNameUI(); }
   }
 
   if (msg.project_data !== undefined) {
@@ -804,6 +897,7 @@ setMessageHandler((event) => {
 
   latestState = msg.objects || {};
   latestPlc = msg.plc || {};
+  renderLogicMonitor();
   if (msg.plc?.tags && JSON.stringify(msg.plc.tags) !== JSON.stringify(latestTags)) {
     latestTags = msg.plc.tags;
     renderTags();
@@ -1164,11 +1258,63 @@ function logicSelect(options, selected) {
   return `<select>${options.map(o => `<option value="${o.tag}|${o.point}" ${`${o.tag}|${o.point}` === selected ? "selected" : ""}>${o.label}</option>`).join("")}</select>`;
 }
 
+function logicCurrentValue(ref) {
+  const obj = latestState[ref?.object_tag];
+  if (!obj || !ref?.io_point) return { available: false, value: undefined };
+  if (!Object.prototype.hasOwnProperty.call(obj, ref.io_point)) return { available: false, value: undefined };
+  return { available: true, value: obj[ref.io_point] };
+}
+
+function logicConditionMatches(rule, value) {
+  if (rule.operator === "rising" || rule.operator === "falling") return null;
+  if (rule.operator === "truthy") return Boolean(value);
+  const expectedRaw = String(rule.value ?? "").trim();
+  const expected = expectedRaw.toLowerCase() === "true" ? true : expectedRaw.toLowerCase() === "false" ? false : (expectedRaw !== "" && !Number.isNaN(Number(expectedRaw)) ? Number(expectedRaw) : expectedRaw);
+  const actual = typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value)) ? Number(value) : value;
+  return rule.operator === "not_equals" ? actual != expected : actual == expected;
+}
+
+function logicDisplayValue(value) {
+  if (value === undefined) return "—";
+  if (value === null) return "null";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function renderLogicMonitor() {
+  const host = document.getElementById("logic-live-monitor");
+  const summary = document.getElementById("logic-monitor-summary");
+  if (!host) return;
+  if (!latestLogicRules.length) {
+    host.innerHTML = '<p class="empty">Add a rule to see live condition status.</p>';
+    if (summary) summary.textContent = "No rules";
+    return;
+  }
+  const rows = latestLogicRules.map((rule, i) => {
+    const source = logicCurrentValue(rule.source);
+    const destination = logicCurrentValue(rule.destination);
+    const match = source.available ? logicConditionMatches(rule, source.value) : null;
+    const status = rule.enabled === false ? { label: "Disabled", cls: "is-disabled" } : !source.available ? { label: "No live value", cls: "is-unknown" } : match === null ? { label: "Edge · runtime", cls: "is-unknown" } : match ? { label: "Condition true", cls: "is-true" } : { label: "Condition false", cls: "is-false" };
+    return `<tr><td>Rule ${i + 1}</td><td>${escapeHtml(rule.source?.object_tag || "—")} → ${escapeHtml(rule.source?.io_point || "—")}</td><td><code>${escapeHtml(logicDisplayValue(source.value))}</code></td><td><span class="logic-status-pill ${status.cls}">${status.label}</span></td><td>${escapeHtml(rule.destination?.object_tag || "—")} → ${escapeHtml(rule.destination?.io_point || "—")}</td><td><code>${escapeHtml(logicDisplayValue(destination.value))}</code></td></tr>`;
+  }).join("");
+  host.innerHTML = `<div class="logic-monitor-table-wrap"><table class="logic-monitor-table"><thead><tr><th>Rule</th><th>Source</th><th>Current</th><th>Condition</th><th>Destination</th><th>Current</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const active = latestLogicRules.filter(r => r.enabled !== false);
+  const trueCount = active.filter(r => { const v = logicCurrentValue(r.source); return v.available && logicConditionMatches(r, v.value) === true; }).length;
+  if (summary) summary.textContent = `${trueCount} / ${active.length} enabled conditions true`;
+}
+
 function renderLogicRules() {
   const list = document.getElementById("logic-rules-list");
-  if (!list) return;
   const sources = readableIoPoints();
   const destinations = writableIoPoints();
+  const enabledCount = latestLogicRules.filter(rule => rule.enabled !== false).length;
+  const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+  setText("logic-launch-count", `${latestLogicRules.length} ${latestLogicRules.length === 1 ? "rule" : "rules"}`);
+  setText("logic-launch-enabled", `${enabledCount} enabled`);
+  setText("logic-workspace-total", latestLogicRules.length);
+  setText("logic-workspace-active", enabledCount);
+  setText("logic-workspace-io", sources.length);
+  if (!list) return;
   list.innerHTML = latestLogicRules.map((rule, i) => {
     const src = `${rule.source?.object_tag || ""}|${rule.source?.io_point || ""}`;
     const dst = `${rule.destination?.object_tag || ""}|${rule.destination?.io_point || ""}`;
@@ -1186,6 +1332,7 @@ function renderLogicRules() {
       <div class="logic-rule-row logic-rule-if">
         <span class="logic-rule-tag">IF</span>
         ${logicSelect(sources, src)}
+        <select class="logic-condition-preset" aria-label="Condition preset" title="Choose a common condition"><option value="custom">Condition…</option><option value="on">Is ON</option><option value="off">Is OFF</option><option value="equals">Equals value</option><option value="not_equals">Not equals value</option><option value="rising">Rising edge</option><option value="falling">Falling edge</option></select>
         <select class="logic-op">
           <option value="truthy" ${rule.operator === "truthy" ? "selected" : ""}>is ON</option>
           <option value="equals" ${rule.operator === "equals" ? "selected" : ""}>equals</option>
@@ -1226,8 +1373,19 @@ function renderLogicRules() {
       const label = card.querySelector(".logic-toggle-label");
       if (label) label.textContent = e.target.checked ? "Enabled" : "Disabled";
     });
+    card.querySelector(".logic-condition-preset")?.addEventListener("change", e => {
+      const preset = e.target.value;
+      if (preset === "custom") return;
+      const op = card.querySelector(".logic-op");
+      const val = card.querySelector(".logic-value");
+      if (preset === "on") { op.value = "truthy"; val.value = ""; }
+      else if (preset === "off") { op.value = "equals"; val.value = "false"; }
+      else if (["equals", "not_equals", "rising", "falling"].includes(preset)) op.value = preset;
+      changed();
+    });
     card.querySelector(".logic-delete")?.addEventListener("click", () => { latestLogicRules.splice(i, 1); markDirty(); send({ action: "set_logic_rules", rules: latestLogicRules }); renderLogicRules(); });
   });
+  renderLogicMonitor();
 }
 
 document.getElementById("logic-add-btn")?.addEventListener("click", () => {
@@ -1255,6 +1413,8 @@ function parseSequenceValue(value) {
 function renderSequences() {
   const list = document.getElementById("sequence-list");
   if (!list) return;
+  const countLabel = document.getElementById("sequence-launch-count");
+  if (countLabel) countLabel.textContent = `${latestSequences.length} sequence${latestSequences.length === 1 ? "" : "s"}`;
   const sources = readableIoPoints();
   const destinations = writableIoPoints();
   list.innerHTML = latestSequences.map((seq, si) => {
@@ -1356,6 +1516,29 @@ function highlightActiveSteps() {
   });
 }
 
+// The Sequence Editor lives in a roomy workspace instead of crowding the Inspector.
+const sequenceEditorOverlay = document.getElementById("sequence-editor-overlay");
+const sequenceEditorContent = document.getElementById("sequence-editor-content");
+const sequenceEditorBody = document.getElementById("sequence-editor-modal-body");
+const sequenceEditorPlaceholder = document.createComment("sequence editor placeholder");
+if (sequenceEditorContent?.parentNode) sequenceEditorContent.parentNode.insertBefore(sequenceEditorPlaceholder, sequenceEditorContent);
+function openSequenceEditor() {
+  if (!sequenceEditorOverlay || !sequenceEditorContent || !sequenceEditorBody) return;
+  sequenceEditorBody.appendChild(sequenceEditorContent);
+  sequenceEditorOverlay.classList.remove("hidden");
+  document.getElementById("sequence-editor-close")?.focus();
+}
+function closeSequenceEditor() {
+  if (!sequenceEditorOverlay || !sequenceEditorContent) return;
+  if (sequenceEditorPlaceholder.parentNode) sequenceEditorPlaceholder.parentNode.insertBefore(sequenceEditorContent, sequenceEditorPlaceholder.nextSibling);
+  sequenceEditorOverlay.classList.add("hidden");
+  document.getElementById("sequence-editor-open")?.focus();
+}
+document.getElementById("sequence-editor-open")?.addEventListener("click", openSequenceEditor);
+document.getElementById("sequence-editor-close")?.addEventListener("click", closeSequenceEditor);
+sequenceEditorOverlay?.addEventListener("click", event => { if (event.target === sequenceEditorOverlay) closeSequenceEditor(); });
+document.addEventListener("keydown", event => { if (event.key === "Escape" && sequenceEditorOverlay && !sequenceEditorOverlay.classList.contains("hidden")) closeSequenceEditor(); });
+
 document.getElementById("sequence-add-btn")?.addEventListener("click", () => {
   if (!isDesignMode()) return;
   const source = readableIoPoints()[0], dest = writableIoPoints()[0];
@@ -1363,7 +1546,148 @@ document.getElementById("sequence-add-btn")?.addEventListener("click", () => {
   latestSequences.push({ id: `sequence_${Date.now()}`, name: `Sequence ${latestSequences.length + 1}`, enabled: true, auto_start: true, cycle: "once", steps: [{ name: "Step 1", actions: [{ destination: { object_tag: dest.tag, io_point: dest.point }, value: true }], transition: { object_tag: source.tag, io_point: source.point, operator: "truthy", value: "" }, timeout_ms: 0, on_timeout: "fault" }] });
   markDirty(); send({ action: "set_sequences", sequences: latestSequences }); renderSequences();
 });
+document.getElementById("sequence-demo-btn")?.addEventListener("click", () => {
+  const sensors = Object.entries(latestState).filter(([, obj]) => obj.type === "sensor").map(([tag]) => tag);
+  const conveyors = Object.entries(latestState).filter(([, obj]) => obj.type === "conveyor").map(([tag]) => tag);
+  if (!sensors.length || !conveyors.length) {
+    alert("Add at least one sensor and one conveyor before creating the demo sequence.");
+    return;
+  }
+  const sensorTag = sensors[0];
+  const conveyorTag = conveyors[0];
+  latestSequences.push({
+    id: `sensor_conveyor_demo_${Date.now()}`,
+    name: `Demo: ${sensorTag} controls ${conveyorTag}`,
+    enabled: true,
+    auto_start: true,
+    cycle: "continuous",
+    steps: [
+      {
+        name: "Conveyor runs until detected",
+        actions: [{ destination: { object_tag: conveyorTag, io_point: "running" }, value: true }],
+        transition: { object_tag: sensorTag, io_point: "detected", operator: "truthy", value: "" },
+        timeout_ms: 10000,
+        on_timeout: "fault",
+      },
+      {
+        name: "Stop until sensor clears",
+        actions: [{ destination: { object_tag: conveyorTag, io_point: "running" }, value: false }],
+        transition: { object_tag: sensorTag, io_point: "detected", operator: "not_equals", value: true },
+        timeout_ms: 0,
+        on_timeout: "fault",
+      },
+    ],
+  });
+  markDirty();
+  send({ action: "set_sequences", sequences: latestSequences });
+  renderSequences();
+  alert(`Created a continuous demo sequence using ${sensorTag} and ${conveyorTag}. Validate it, then switch to Simulation to run it.`);
+});
+document.getElementById("sequence-machine-cycle-btn")?.addEventListener("click", () => {
+  const objects = Object.entries(latestState);
+  const conveyors = objects.filter(([, obj]) => obj.type === "conveyor");
+  const motors = objects.filter(([, obj]) => obj.type === "motor");
+  const cylinders = objects.filter(([, obj]) => obj.type === "cylinder");
+  const sensors = objects.filter(([, obj]) => obj.type === "sensor");
+  if (!conveyors.length || !cylinders.length || sensors.length < 2) {
+    alert("Full Machine Cycle needs at least one conveyor, one cylinder, and two sensors. Configure one sensor to watch the conveyor and another to watch the cylinder's end position.");
+    return;
+  }
+  const [conveyorTag] = conveyors[0];
+  const [cylinderTag, cylinder] = cylinders[0];
+  const partSensorEntry = sensors.find(([tag, obj]) => obj.watch_tag === conveyorTag) || sensors[0];
+  const limitSensorEntry = sensors.find(([tag, obj]) => obj.watch_tag === cylinderTag && tag !== partSensorEntry[0]);
+  if (!limitSensorEntry) {
+    alert(`Configure a second sensor's Watch Target to ${cylinderTag} (cylinder end-position detection), then create the cycle again.`);
+    return;
+  }
+  const [partSensorTag] = partSensorEntry;
+  const [limitSensorTag] = limitSensorEntry;
+  const actions = (run) => {
+    const list = [{ destination: { object_tag: conveyorTag, io_point: "running" }, value: run }];
+    if (motors.length) list.push({ destination: { object_tag: motors[0][0], io_point: "running" }, value: run });
+    return list;
+  };
+  const extendActions = [];
+  const retractActions = [];
+  if (cylinder.valve_type === "dual") {
+    extendActions.push(
+      { destination: { object_tag: cylinderTag, io_point: "retract_command" }, value: false },
+      { destination: { object_tag: cylinderTag, io_point: "extend_command" }, value: true },
+    );
+    retractActions.push(
+      { destination: { object_tag: cylinderTag, io_point: "extend_command" }, value: false },
+      { destination: { object_tag: cylinderTag, io_point: "retract_command" }, value: true },
+    );
+  } else {
+    extendActions.push({ destination: { object_tag: cylinderTag, io_point: "extend" }, value: true });
+    retractActions.push({ destination: { object_tag: cylinderTag, io_point: "extend" }, value: false });
+  }
+  const faultActions = [...actions(false)];
+  if (cylinder.valve_type === "dual") {
+    faultActions.push(
+      { destination: { object_tag: cylinderTag, io_point: "extend_command" }, value: false },
+      { destination: { object_tag: cylinderTag, io_point: "retract_command" }, value: false },
+    );
+  } else {
+    faultActions.push({ destination: { object_tag: cylinderTag, io_point: "extend" }, value: false });
+  }
+  const sequence = {
+    id: `full_machine_cycle_${Date.now()}`,
+    name: `Full cycle: ${conveyorTag} / ${cylinderTag}`,
+    enabled: true,
+    auto_start: true,
+    cycle: "continuous",
+    steps: [
+      {
+        name: "Feed part to station",
+        actions: actions(true),
+        transition: { object_tag: partSensorTag, io_point: "detected", operator: "truthy", value: "" },
+        timeout_ms: 15000,
+        on_timeout: "fault",
+        on_fault_actions: faultActions,
+      },
+      {
+        name: "Stop feed and extend cylinder",
+        actions: [...actions(false), ...extendActions],
+        transition: { object_tag: limitSensorTag, io_point: "detected", operator: "truthy", value: "" },
+        timeout_ms: 7000,
+        on_timeout: "fault",
+        on_fault_actions: faultActions,
+      },
+      {
+        name: "Retract and confirm home position",
+        actions: retractActions,
+        transition: { object_tag: limitSensorTag, io_point: "detected", operator: "not_equals", value: true },
+        timeout_ms: 7000,
+        on_timeout: "fault",
+        on_fault_actions: faultActions,
+      },
+      {
+        name: "Release station and feed next part",
+        actions: actions(true),
+        transition: { object_tag: partSensorTag, io_point: "detected", operator: "not_equals", value: true },
+        timeout_ms: 15000,
+        on_timeout: "fault",
+        on_fault_actions: faultActions,
+      },
+    ],
+  };
+  latestSequences.push(sequence);
+  markDirty();
+  send({ action: "set_sequences", sequences: latestSequences });
+  renderSequences();
+  alert(`Created a full machine cycle using ${conveyorTag}, ${partSensorTag}, ${cylinderTag}, and ${limitSensorTag}${motors.length ? ` with ${motors[0][0]}` : ""}. Validate the sequence before running it in Simulation.`);
+});
 document.getElementById("sequence-validate-btn")?.addEventListener("click", () => send({ action: "validate_sequences" }));
+document.getElementById("sequence-start-btn")?.addEventListener("click", () => {
+  if (!isSimulationMode()) { alert("Sequences can only be started in Simulation mode."); return; }
+  send({ action: "sequence_command", command: "start" });
+});
+document.getElementById("sequence-recover-btn")?.addEventListener("click", () => {
+  if (!isSimulationMode()) { alert("Sequence fault recovery is available only in Simulation mode."); return; }
+  send({ action: "sequence_command", command: "recover" });
+});
 document.getElementById("sequence-reset-btn")?.addEventListener("click", () => send({ action: "sequence_command", command: "reset" }));
 
 function sendSetPoint(tagName, point, value) {
@@ -1526,6 +1850,59 @@ document.getElementById("open-project-input").addEventListener("change", async (
   e.target.value = ""; // allow re-opening the same file later
 });
 
+const machine3dToggle = document.getElementById("machine-3d-toggle");
+const machine3dPanel = document.getElementById("machine-3d-view");
+const machine3dStatus = document.getElementById("machine-3d-status");
+function setMachine3dEnabled(enabled) {
+  machine3dEnabled = !!enabled;
+  machine3dPanel.hidden = !machine3dEnabled;
+  canvas.style.visibility = machine3dEnabled ? "hidden" : "visible";
+  machine3dToggle.classList.toggle("active", machine3dEnabled);
+  machine3dToggle.setAttribute("aria-pressed", String(machine3dEnabled));
+  if (!machine3dEnabled) return;
+  if (!machine3dLoadPromise) {
+    machine3dLoadPromise = import("./modules/machine-3d-view.js").then(async mod => {
+      machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
+      machine3d.update(latestState);
+      machine3d.setPickHandler((tag, e) => {
+        if (tag) selectComponent(tag, e.ctrlKey || e.shiftKey);
+        else deselectAll();
+      });
+      return machine3d;
+    }).catch(err => {
+      machine3dStatus.textContent = "3D engine unavailable. Check network access and reload.";
+      console.error("Could not initialize 3D machine view", err);
+      machine3dLoadPromise = null;
+      throw err;
+    });
+    machine3dLoadPromise.catch(() => {});
+  } else if (machine3d) machine3d.update(latestState);
+}
+machine3dToggle.addEventListener("click", () => setMachine3dEnabled(!machine3dEnabled));
+document.getElementById("machine-3d-home").addEventListener("click", () => machine3d?.resetCamera());
+const machine3dStage = document.getElementById("machine-3d-stage");
+machine3dPanel.addEventListener("pointerdown", (e) => e.stopPropagation());
+machine3dStage.addEventListener("dragover", (e) => {
+  if (!machine3dEnabled || !isDesignMode() || !e.dataTransfer.types.includes("text/plain")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+  machine3dStage.classList.add("drag-over");
+});
+machine3dStage.addEventListener("dragleave", (e) => {
+  if (!machine3dStage.contains(e.relatedTarget)) machine3dStage.classList.remove("drag-over");
+});
+machine3dStage.addEventListener("drop", (e) => {
+  e.preventDefault();
+  e.stopPropagation(); 
+  machine3dStage.classList.remove("drag-over");
+  if (!machine3dEnabled || !isDesignMode() || !machine3d) return;
+  const componentType = e.dataTransfer.getData("text/plain");
+  if (!componentType) return;
+  const point = machine3d.screenToLayout(e.clientX, e.clientY);
+  if (!point) return;
+  sendAddComponent(componentType, Math.max(0, point.x), Math.max(0, point.y));
+});
+
 document.getElementById("reset-view-btn").addEventListener("click", () => {
   if (!isDesignMode()) return;
   if (!confirm("Remove all components from the simulation area?")) return;
@@ -1558,7 +1935,7 @@ function setDashboardOpen(open) {
 function dashboardMachineStatus(obj) {
   const fault = !!(obj.fault || obj.emergency_stop || obj.error);
   if (fault) return ["FAULT", "fault"];
-  if (obj.type === "conveyor" || obj.type === "motor") return obj.running ? ["RUNNING", "running"] : ["STOPPED", "stopped"];
+  if (obj.type === "conveyor" || obj.type === "motor" || obj.type === "index_table") return obj.running ? ["RUNNING", "running"] : ["STOPPED", "stopped"];
   if (obj.type === "cylinder") {
     if (obj.moving) return ["MOVING", "running"];
     if (obj.fault) return ["FAULT", "fault"];
@@ -1823,7 +2200,7 @@ function renderWidgetCanvas() {
       trend: `<span class="cw-title">${title}</span><svg class="cw-trend" data-role="trend" viewBox="0 0 280 95" preserveAspectRatio="none"></svg>`,
       machine_status: `<span class="cw-title">${escapeHtml(w.label || "Machine Status")}</span><span class="cw-status" data-role="val">—</span>`,
     }[w.type];
-    return `<div class="cw cw-${w.type} ${widgetEditMode && w.id === selectedWidgetId ? "selected" : ""}" data-wid="${escapeHtml(w.id)}" style="left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px">${inner}</div>`;
+    return `<div class="cw cw-${w.type} ${widgetEditMode && w.id === selectedWidgetId ? "selected" : ""}" data-wid="${escapeHtml(w.id)}" style="left:${w.x}px;top:${w.y}px;width:${w.w}px;height:${w.h}px">${inner}${widgetEditMode && w.id === selectedWidgetId ? '<span class="cw-resize-handle" title="Drag to resize" aria-label="Resize widget"></span>' : ""}</div>`;
   }).join("");
   updateCustomWidgetValues();
 }
@@ -1988,14 +2365,21 @@ document.getElementById("widget-canvas")?.addEventListener("pointerdown", e => {
   if (widgetEditMode) {                       // ---- drag to move
     e.preventDefault();
     selectWidget(w.id);
-    const sx = e.clientX, sy = e.clientY, ox = w.x, oy = w.y;
+    const resizing = !!e.target.closest(".cw-resize-handle");
+    const sx = e.clientX, sy = e.clientY, ox = w.x, oy = w.y, ow = w.w, oh = w.h;
     let moved = false;
     el.setPointerCapture(e.pointerId);
     const move = ev => {
       moved = true;
-      w.x = Math.max(0, Math.round((ox + ev.clientX - sx) / WIDGET_GRID) * WIDGET_GRID);
-      w.y = Math.max(0, Math.round((oy + ev.clientY - sy) / WIDGET_GRID) * WIDGET_GRID);
-      el.style.left = `${w.x}px`; el.style.top = `${w.y}px`;
+      if (resizing) {
+        w.w = Math.max(60, Math.round((ow + ev.clientX - sx) / WIDGET_GRID) * WIDGET_GRID);
+        w.h = Math.max(30, Math.round((oh + ev.clientY - sy) / WIDGET_GRID) * WIDGET_GRID);
+        el.style.width = `${w.w}px`; el.style.height = `${w.h}px`;
+      } else {
+        w.x = Math.max(0, Math.round((ox + ev.clientX - sx) / WIDGET_GRID) * WIDGET_GRID);
+        w.y = Math.max(0, Math.round((oy + ev.clientY - sy) / WIDGET_GRID) * WIDGET_GRID);
+        el.style.left = `${w.x}px`; el.style.top = `${w.y}px`;
+      }
     };
     const up = () => {
       el.removeEventListener("pointermove", move);
@@ -2196,6 +2580,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && reportsOpe
 // ---------- Rendering ----------
 
 function render(state) {
+  if (machine3dEnabled && machine3d) machine3d.update(state);
   // Remove graphical elements that no longer exist in the simulation.
   for (const [tagName, el] of Object.entries(elements)) {
     if (!state[tagName]) {
@@ -2221,6 +2606,7 @@ function render(state) {
     if (obj.type === "conveyor") renderConveyor(tagName, obj, deps);
     else if (obj.type === "cylinder") renderCylinder(tagName, obj, deps);
     else if (obj.type === "motor") renderMotor(tagName, obj, deps);
+    else if (obj.type === "index_table") renderIndexTable(tagName, obj, deps);
     else if (obj.type === "sensor") renderSensor(tagName, obj, deps);
     else if (obj.type === "push_button") renderPushButton(tagName, obj, deps);
     else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj, deps);
@@ -2379,6 +2765,7 @@ const TYPE_BADGE = {
   conveyor: { label: "CV", color: "#3a7bd5" },
   cylinder: { label: "CY", color: "#c9822e" },
   motor: { label: "MO", color: "#3cce80" },
+  index_table: { label: "IT", color: "#e0a030" },
   sensor: { label: "SE", color: "#a259d9" },
   push_button: { label: "PB", color: "#4aa3df" },
   emergency_push_button: { label: "EP", color: "#f35361" },
@@ -2391,6 +2778,7 @@ const TYPE_LABEL = {
   conveyor: "Conveyor",
   cylinder: "Cylinder",
   motor: "Motor",
+  index_table: "Index table",
   sensor: "Sensor",
   push_button: "Push button",
   emergency_push_button: "Emergency PB",
@@ -2404,6 +2792,7 @@ const TYPE_LABEL = {
 const STATUS_FIELD = {
   conveyor: "running",
   motor: "running",
+  index_table: "running",
   cylinder: "extended",
   sensor: "detected",
   push_button: "pressed",
@@ -2686,6 +3075,7 @@ function renderProduction() {
   setText("production-good", latestProduction.good_count ?? 0);
   setText("production-reject", latestProduction.reject_count ?? 0);
   setText("production-cycle", Number.isFinite(latestProduction.cycle_time_s) ? `${latestProduction.cycle_time_s.toFixed(1)} s` : "—");
+  setText("production-reject-rate", `${((latestProduction.reject_rate || 0) * 100).toFixed(1)}%`);
   setText("production-availability", `${((latestProduction.availability || 0) * 100).toFixed(1)}%`);
   setText("production-performance", `${((latestProduction.performance || 0) * 100).toFixed(1)}%`);
   setText("production-quality", `${((latestProduction.quality || 0) * 100).toFixed(1)}%`);
@@ -3138,6 +3528,56 @@ document.querySelectorAll(".tabs .tab").forEach((tabBtn) => {
   });
 });
 
+// ---------- Generic pop-out for any Inspector tab ----------
+const popoutOverlay = document.getElementById("panel-popout-overlay");
+const popoutBody = document.getElementById("panel-popout-body");
+let popoutPanel = null;
+const popoutPlaceholder = document.createComment("popout placeholder");
+function openPanelPopout() {
+  const tab = document.querySelector(".tabs .tab.active");
+  if (!tab || !popoutOverlay) return;
+  if (tab.dataset.tab === "sequences") { document.getElementById("sequence-editor-open")?.click(); return; }
+  const panel = document.querySelector(`.tab-panel[data-panel="${tab.dataset.tab}"]`);
+  if (!panel) return;
+  popoutPanel = panel;
+  panel.parentNode.insertBefore(popoutPlaceholder, panel);
+  popoutBody.appendChild(panel);
+  const tabName = tab.textContent.trim();
+  document.getElementById("panel-popout-title").textContent = tabName;
+  const subtitle = document.getElementById("panel-popout-subtitle");
+  const popoutWindow = popoutOverlay.querySelector(".sequence-editor-window");
+  popoutWindow?.classList.toggle("mapping-workspace-window", tab.dataset.tab === "plc");
+  popoutWindow?.classList.toggle("logic-workspace-window", tab.dataset.tab === "logic");
+  panel.classList.toggle("logic-workspace-active", tab.dataset.tab === "logic");
+  if (subtitle) {
+    subtitle.textContent = tab.dataset.tab === "plc"
+      ? "PLC Mapping Workspace · search signals, assign addresses, review live values, and validate mappings."
+      : tab.dataset.tab === "logic"
+        ? "Logic Editor · configure simulation rules, review I/O relationships, and validate before testing."
+        : `Expanded ${tabName} engineering view.`;
+  }
+  if (tab.dataset.tab === "logic") renderLogicRules();
+  popoutOverlay.classList.remove("hidden");
+}
+function closePanelPopout() {
+  if (!popoutPanel) return;
+  popoutPlaceholder.parentNode?.insertBefore(popoutPanel, popoutPlaceholder);
+  popoutPlaceholder.remove();
+  popoutPanel.classList.remove("logic-workspace-active");
+  popoutPanel = null;
+  popoutOverlay.classList.add("hidden");
+  popoutOverlay.querySelector(".sequence-editor-window")?.classList.remove("mapping-workspace-window", "logic-workspace-window");
+}
+document.getElementById("tab-popout-btn")?.addEventListener("click", openPanelPopout);
+document.getElementById("logic-editor-open")?.addEventListener("click", () => {
+  const logicTab = document.querySelector('.tabs .tab[data-tab="logic"]');
+  logicTab?.click();
+  openPanelPopout();
+});
+document.getElementById("panel-popout-close")?.addEventListener("click", closePanelPopout);
+popoutOverlay?.addEventListener("click", e => { if (e.target === popoutOverlay) closePanelPopout(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && popoutPanel) closePanelPopout(); });
+
 // ---------- PLC connection ----------
 
 const backendSelect = document.getElementById("plc-backend-select");
@@ -3509,6 +3949,7 @@ function renderMappingTable(plc, state) {
   const tbody = document.getElementById("mapping-tbody");
   const grouping = document.getElementById("mapping-group").checked;
   const rows = allMappingRows();
+  updateMappingWorkspaceSummary(rows, plc?.mapping || []);
   // Fingerprint uses only static fields (identity + PLC node address).
   // Do NOT stringify plc.mapping: it contains live_value, which changes
   // with every tag update and would force a full rebuild (blinking list).
@@ -3530,6 +3971,23 @@ function renderMappingTable(plc, state) {
     cells.liveCell.textContent = value === undefined ? "—" : String(value);
   }
   applyMappingFilter();
+}
+
+
+function updateMappingWorkspaceSummary(rows, mappingList) {
+  const mappedKeys = new Set((mappingList || [])
+    .filter(m => String(m.plc_node || "").trim())
+    .map(mappingEntryKey));
+  const total = rows.length;
+  const mapped = rows.filter(row => mappedKeys.has(mappingIdentity(row))).length;
+  const totalEl = document.getElementById("mapping-summary-total");
+  const mappedEl = document.getElementById("mapping-summary-mapped");
+  const unmappedEl = document.getElementById("mapping-summary-unmapped");
+  if (totalEl) totalEl.textContent = String(total);
+  if (mappedEl) mappedEl.textContent = String(mapped);
+  if (unmappedEl) unmappedEl.textContent = String(Math.max(0, total - mapped));
+  const summary = document.getElementById("mapping-workspace-summary");
+  if (summary) summary.classList.toggle("mapping-has-unmapped", total > mapped);
 }
 
 function mappingEntryKey(m) {

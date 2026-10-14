@@ -18,6 +18,10 @@ class SequenceEngine:
         self._previous = {}
         self._elapsed = {}
         self._faults = {}
+        # A fault requires explicit operator recovery and then an explicit
+        # Start. This prevents auto_start sequences from immediately repeating
+        # the same failed motion as soon as a timeout occurs.
+        self._recovery_required = set()
         self.last_status = []
 
     def _read(self, point):
@@ -92,6 +96,12 @@ class SequenceEngine:
             if not sequence.get("enabled", True) or not steps:
                 continue
             state = self._states.get(seq_id, -1)
+            if seq_id in self._faults:
+                status.append(self._status(seq_id, sequence, state, "fault"))
+                continue
+            if seq_id in self._recovery_required:
+                status.append(self._status(seq_id, sequence, -1, "stopped"))
+                continue
             if state == -1:
                 if sequence.get("auto_start", True) or self._condition(sequence.get("start_condition")):
                     self._enter(seq_id, 0, steps[0])
@@ -122,7 +132,13 @@ class SequenceEngine:
                     status.append(self._status(seq_id, sequence, -1, "stopped"))
                     continue
                 else:
-                    self._faults[seq_id] = f"Timeout in step {state + 1}"
+                    self._faults[seq_id] = f"Timeout in step {state + 1}: {step.get('name') or 'unnamed step'}"
+                    self._recovery_required.add(seq_id)
+                    # Explicit, user-configured fail-safe actions are executed
+                    # once at fault time (e.g. stop conveyor/motor, de-energize
+                    # valve commands). No implicit machine-specific assumptions.
+                    for action in step.get("on_fault_actions") or []:
+                        self._write(action)
                     status.append(self._status(seq_id, sequence, state, "fault"))
                     continue
 
@@ -150,15 +166,38 @@ class SequenceEngine:
             rows.append(self._status(seq_id, seq, state, state_name))
         return rows
 
-    def start(self, sequence_id):
-        self._states[str(sequence_id)] = -1
-        self._faults.pop(str(sequence_id), None)
+    def start(self, sequence_id=None):
+        """Explicitly start one sequence, or all sequences when id is None."""
+        ids = [str(sequence_id)] if sequence_id is not None else list(set(self._states) | set(self._faults) | set(self._recovery_required))
+        for seq_id in ids:
+            self._states[seq_id] = -1
+            self._faults.pop(seq_id, None)
+            self._recovery_required.discard(seq_id)
+            self._elapsed[seq_id] = 0.0
+
+    def recover(self, sequence_id=None):
+        """Acknowledge faults and hold affected sequences stopped until Start."""
+        ids = [str(sequence_id)] if sequence_id is not None else list(self._faults)
+        for seq_id in ids:
+            if seq_id in self._faults:
+                self._faults.pop(seq_id, None)
+                self._states[seq_id] = -1
+                self._elapsed[seq_id] = 0.0
+                self._recovery_required.add(seq_id)
 
     def stop(self, sequence_id=None):
         if sequence_id is None:
-            self.reset()
+            for seq_id in list(set(self._states) | set(self._faults) | set(self._recovery_required)):
+                self._states[seq_id] = -1
+                self._faults.pop(seq_id, None)
+                self._recovery_required.discard(seq_id)
+                self._elapsed[seq_id] = 0.0
         else:
-            self._states[str(sequence_id)] = -1
+            seq_id = str(sequence_id)
+            self._states[seq_id] = -1
+            self._faults.pop(seq_id, None)
+            self._recovery_required.discard(seq_id)
+            self._elapsed[seq_id] = 0.0
 
     def _status(self, seq_id, sequence, state, state_name):
         steps = sequence.get("steps") or []
