@@ -3237,6 +3237,9 @@ body.panel-fullscreen .panel-fullscreen-close { display: inline-block; }
 .machine-3d-toolbar strong { letter-spacing:.12em; }
 .machine-3d-toolbar span { color:#a9bacb; flex:1; }
 .machine-3d-toolbar button { background:#263746; color:#e5edf5; border:1px solid #50677a; border-radius:4px; padding:5px 9px; cursor:pointer; }
+.machine-3d-toolbar button:hover { background:#355064; border-color:#79a8c7; }
+#machine-3d-stage canvas { cursor:grab; touch-action:none; }
+#machine-3d-stage canvas:active { cursor:grabbing; }
 .machine-3d-legend { position:absolute; z-index:2; bottom:0; left:0; right:0; padding:7px 14px; color:#9eb0c1; background:#0d151ee8; border-top:1px solid #405365; font-size:11px; }
 
 /* Drag palette components directly into the 3D machine workspace. */

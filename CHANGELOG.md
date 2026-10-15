@@ -1,3 +1,17 @@
+## v11.22 — 3D layout editing and industrial detail
+- Added direct drag-to-reposition for existing 3D components in Design mode, with 10-unit layout snapping and saved X/Y coordinates.
+- Added a 90-degree rotate-selected control in the 3D toolbar, routed through the existing component property system.
+- Refined conveyor geometry with slimmer fabricated rails, feet, exposed fasteners, and less block-like proportions.
+- Preserved the existing 2D editor, shared properties inspector, and simulation-mode interactions.
+
+## v11.20 — 3D Simulation Property Parity
+- 3D component selection opens the existing Properties inspector, exposing the same component settings, live status, and Simulation Controls as the 2D view.
+- Added Simulation-only press/release controls for push buttons, latch/reset controls for emergency push buttons, and ON/OFF controls for toggle switches.
+- Added direct 3D interaction for momentary push buttons, emergency push buttons, and toggle switches in Simulation mode.
+- Reflected live machine states in 3D: conveyor roller motion, motor rotation, cylinder extension progress, sensor detection illumination, control actuation, tower-light states, index-table motion, and fault/E-stop indicators.
+- Kept the existing 2D view and backend simulation command/property paths; bumped the frontend script version to avoid stale cache.
+- Validation: 64 Python tests passed; JavaScript syntax, Python compilation, and ZIP integrity checked.
+
 ## v11.19 — Dedicated Logic Editor Workspace
 - Replaced the dense Logic Inspector form with a compact launch card and live rule counts.
 - Added a large Logic Editor workspace using the existing overlay infrastructure, with rule totals, enabled-rule count, readable-I/O count, and clearer IF/THEN editing layout.

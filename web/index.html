@@ -256,7 +256,7 @@
     <div id="canvas-wrap">
       <div id="canvas-viewport">
         <div id="canvas"><svg id="connections-layer" aria-hidden="true"></svg></div>
-        <div id="machine-3d-view" class="machine-3d-view" hidden><div class="machine-3d-toolbar"><strong>3D MACHINE VIEW</strong><span id="machine-3d-status">Initializing 3D engine…</span><button type="button" id="machine-3d-home">Reset camera</button></div><div id="machine-3d-stage"></div><div class="machine-3d-legend">Conveyor · Motor · Cylinder · Sensor · Index table · Controls</div></div>
+        <div id="machine-3d-view" class="machine-3d-view" hidden><div class="machine-3d-toolbar"><strong>3D MACHINE VIEW</strong><span id="machine-3d-status">Initializing 3D engine…</span><button type="button" id="machine-3d-rotate" title="Rotate selected component 90 degrees">Rotate selected ↻ 90°</button><button type="button" id="machine-3d-home">Reset camera</button></div><div id="machine-3d-stage"></div><div class="machine-3d-legend">In Design mode, drag an existing component to reposition it (10-unit snap); select it and use Rotate selected to turn it 90°. Select any component to open the same Properties and Simulation Controls as 2D. In Simulation mode, press push buttons, toggle switches, and latch/reset the E-stop directly in 3D. Conveyor, motor, cylinder, sensor, and index-table states update from the simulation.</div></div>
       </div>
     </div>
 
@@ -674,6 +674,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=30"></script>
+  <script type="module" src="app.js?v=31"></script>
 </body>
 </html>

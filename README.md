@@ -191,3 +191,11 @@ The Logic Editor includes a live rule monitor for current source and destination
 
 ## 3D Machine View (foundation)
 Use **3D Machine View** in the viewport toolbar to switch from the existing 2D layout to a 3D representation of the machine. The scene includes lighting, a floor/grid, orbit and zoom controls, and visual models for common machine components. Component placement and key simulation state (including conveyor product positions) are sourced from the existing scene state. Use **Reset camera** to restore the view. The current 3D foundation is a visualization layer, not yet a full physics-based digital twin; Three.js is loaded from a CDN when the view is opened, so network access is required.
+
+## 3D machine view and simulation controls
+
+The 3D view uses the same component state and Properties inspector as the 2D editor. Select a component in 3D to inspect its properties and live status; in Simulation mode the inspector exposes the existing virtual controls. Push buttons, emergency push buttons, and toggle switches can also be operated directly in the 3D scene. Live simulation state drives conveyor roller motion, motor rotation, cylinder extension, sensor indication, tower-light lamps, index-table movement, and fault/E-stop indicators. The 2D editor remains available as an alternative view.
+
+
+### 3D layout editing (v11.22)
+In Design mode, drag an already-placed component across the 3D floor to reposition it. Placement snaps to 10 layout units and commits the same X/Y properties used by the 2D editor. Select a component and use **Rotate selected 90°** in the 3D toolbar to rotate it through its existing `rotation_value` property. Camera orbit remains available by dragging empty space; scroll to zoom. The 3D geometry is still a lightweight procedural approximation, not a CAD-grade or physics-based digital twin.

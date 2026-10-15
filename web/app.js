@@ -551,6 +551,7 @@ function selectComponent(tagName, additive = false) {
 
   renderPropertyPanel();
   renderComponentsList(latestState);
+  machine3d?.setSelectedTag(selectedTag);
 }
 
 function deselectAll() {
@@ -559,6 +560,7 @@ function deselectAll() {
   for (const el of Object.values(elements)) el.classList.remove("selected");
   renderPropertyPanel();
   renderComponentsList(latestState);
+  machine3d?.setSelectedTag(null);
 }
 
 function buildSimulationControls(obj) {
@@ -579,6 +581,15 @@ function buildSimulationControls(obj) {
     controls.push(`<button type="button" class="sim-control sim-start" data-sensor-input="1">Force ON</button>`);
     controls.push(`<button type="button" class="sim-control sim-stop" data-sensor-input="0">Force OFF</button>`);
     controls.push(`<button type="button" class="sim-control" data-sensor-input="auto">Auto / Physical</button>`);
+  } else if (obj.type === "push_button") {
+    controls.push(`<button type="button" class="sim-control sim-start" data-sim-property="pressed" data-sim-value="1">Press</button>`);
+    controls.push(`<button type="button" class="sim-control sim-stop" data-sim-property="pressed" data-sim-value="0">Release</button>`);
+  } else if (obj.type === "emergency_push_button") {
+    controls.push(`<button type="button" class="sim-control sim-start" data-sim-property="pressed" data-sim-value="1">Latch E-Stop</button>`);
+    controls.push(`<button type="button" class="sim-control sim-stop" data-sim-property="pressed" data-sim-value="0">Reset E-Stop</button>`);
+  } else if (obj.type === "toggle_switch") {
+    controls.push(`<button type="button" class="sim-control sim-start" data-sim-property="on" data-sim-value="1">Switch ON</button>`);
+    controls.push(`<button type="button" class="sim-control sim-stop" data-sim-property="on" data-sim-value="0">Switch OFF</button>`);
   } else if (obj.type === "cylinder") {
     if (obj.valve_type === "dual") {
       controls.push(`<button type="button" class="sim-control sim-start" data-sim-action="extend">Extend</button>`);
@@ -716,6 +727,12 @@ function renderPropertyPanel() {
     </form>
   `;
 
+  propertyBody.querySelectorAll("[data-sim-property]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isSimulationMode() || !selectedTag) return;
+      sendSetProperty(selectedTag, button.dataset.simProperty, button.dataset.simValue);
+    });
+  });
   propertyBody.querySelectorAll("[data-sim-point]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!isSimulationMode() || !selectedTag) return;
@@ -1864,9 +1881,44 @@ function setMachine3dEnabled(enabled) {
     machine3dLoadPromise = import("./modules/machine-3d-view.js").then(async mod => {
       machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
       machine3d.update(latestState);
+      machine3d.setInteractionHandler((tag, phase) => {
+        if (!isSimulationMode() || !tag) return;
+        const obj = latestState[tag];
+        if (!obj) return;
+        if (obj.type === "push_button") {
+          if (phase === "down") sendSetProperty(tag, "pressed", 1);
+          if (phase === "up") sendSetProperty(tag, "pressed", 0);
+        } else if (phase === "down" && obj.type === "emergency_push_button") {
+          sendSetProperty(tag, "pressed", obj.pressed ? 0 : 1);
+        } else if (phase === "down" && obj.type === "toggle_switch") {
+          sendSetProperty(tag, "on", obj.on ? 0 : 1);
+        }
+      });
       machine3d.setPickHandler((tag, e) => {
-        if (tag) selectComponent(tag, e.ctrlKey || e.shiftKey);
-        else deselectAll();
+        if (tag) {
+          // A 3D pick uses the same inspector and simulation controls as 2D.
+          selectInspectorTab("properties");
+          selectComponent(tag, e.ctrlKey || e.shiftKey);
+          machine3d.setSelectedTag(tag);
+        } else deselectAll();
+      });
+      machine3d.setTransformHandler({
+        canStart: (tag) => {
+          if (!isDesignMode() || !latestState[tag]) return false;
+          selectInspectorTab("properties");
+          selectComponent(tag);
+          machine3d.setSelectedTag(tag);
+          return true;
+        },
+        move: () => { machine3dStatus.textContent = "Moving component · release to save position"; },
+        end: (tag, x, y) => {
+          if (!isDesignMode()) return;
+          pushHistory();
+          markDirty();
+          sendSetProperty(tag, "x", x);
+          sendSetProperty(tag, "y", y);
+          machine3dStatus.textContent = "Position updated · drag components to reposition · rotate from toolbar";
+        }
       });
       return machine3d;
     }).catch(err => {
@@ -1880,6 +1932,20 @@ function setMachine3dEnabled(enabled) {
 }
 machine3dToggle.addEventListener("click", () => setMachine3dEnabled(!machine3dEnabled));
 document.getElementById("machine-3d-home").addEventListener("click", () => machine3d?.resetCamera());
+document.getElementById("machine-3d-rotate").addEventListener("click", () => {
+  if (!isDesignMode()) { alert("Rotate components in Design mode."); return; }
+  if (!selectedTag || !latestState[selectedTag]) { alert("Select a component in the 3D view first."); return; }
+  const obj = latestState[selectedTag];
+  if (!["conveyor", "motor", "cylinder", "index_table"].includes(obj.type)) {
+    alert("Rotation is not available for this component type.");
+    return;
+  }
+  const nextRotation = ((Number(obj.rotation) || 0) + 90) % 360;
+  pushHistory();
+  markDirty();
+  sendSetProperty(selectedTag, "rotation_value", nextRotation);
+  machine3d?.setSelectedTag(selectedTag);
+});
 const machine3dStage = document.getElementById("machine-3d-stage");
 machine3dPanel.addEventListener("pointerdown", (e) => e.stopPropagation());
 machine3dStage.addEventListener("dragover", (e) => {
