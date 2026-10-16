@@ -1878,7 +1878,7 @@ function setMachine3dEnabled(enabled) {
   machine3dToggle.setAttribute("aria-pressed", String(machine3dEnabled));
   if (!machine3dEnabled) return;
   if (!machine3dLoadPromise) {
-    machine3dLoadPromise = import("./modules/machine-3d-view.js").then(async mod => {
+    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=2").then(async mod => {
       machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
       machine3d.update(latestState);
       machine3d.setInteractionHandler((tag, phase) => {

@@ -11,6 +11,7 @@ export async function createMachine3DView(container, statusEl) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   container.replaceChildren(renderer.domElement);
   scene.add(new THREE.HemisphereLight(0xc8e3ff, 0x27313a, 2.0));
   const key = new THREE.DirectionalLight(0xffffff, 2.4); key.position.set(-400, 700, 500); key.castShadow = true; scene.add(key);
@@ -21,7 +22,13 @@ export async function createMachine3DView(container, statusEl) {
   const meshes = new Map(); let currentState = {}; let selectedTag = null; let animationTime = 0;
   let transformHandlers = null; let transformTag = null; let transformOffset = null; let transformMoved = false;
   const mat = (color, metalness=.25, roughness=.55) => new THREE.MeshStandardMaterial({color, metalness, roughness});
-  const steel=mat(0x8395a3,.72,.35), dark=mat(0x273744,.5,.45), belt=mat(0x202a31,.1,.85), blue=mat(0x2585c7,.35,.4), orange=mat(0xef9a35,.2,.5), green=mat(0x36b77b,.1,.45), red=mat(0xd84c4c,.1,.45), yellow=mat(0xe6c828,.1,.45), productMat=mat(0xd6a64b,.12,.4);
+  const steel=mat(0x8395a3,.72,.35), dark=mat(0x273744,.5,.45), blue=mat(0x2585c7,.35,.4), orange=mat(0xef9a35,.2,.5), green=mat(0x36b77b,.1,.45), red=mat(0xd84c4c,.1,.45), yellow=mat(0xe6c828,.1,.45);
+  function canvasTex(draw,w,h){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=4;return t;}
+  const cardboardTex=canvasTex((x,w,h)=>{x.fillStyle='#c79a5b';x.fillRect(0,0,w,h);for(let i=0;i<500;i++){x.fillStyle=`rgba(90,60,20,${Math.random()*.1})`;x.fillRect(Math.random()*w,Math.random()*h,3,1);}x.fillStyle='rgba(235,220,180,.9)';x.fillRect(0,h/2-9,w,18);x.strokeStyle='rgba(70,45,15,.6)';x.lineWidth=4;x.strokeRect(0,0,w,h);},128,128);
+  const productMat=new THREE.MeshStandardMaterial({map:cardboardTex,roughness:.85,metalness:0});
+  const beltTex=canvasTex((x,w,h)=>{x.fillStyle='#1d252b';x.fillRect(0,0,w,h);x.fillStyle='#2a343b';for(let i=0;i<w;i+=16)x.fillRect(i,0,4,h);},64,64);
+  const belt=new THREE.MeshStandardMaterial({map:beltTex,roughness:.92,metalness:.05});
+  const chrome=mat(0xdfe6ec,.95,.15), alu=mat(0x9fb2c2,.8,.3);
   const dimLampMats=[mat(0x592c2c,.1,.6),mat(0x29365b,.1,.6),mat(0x28513a,.1,.6),mat(0x5a5023,.1,.6)];
   function box(parent, size, material, pos) { const m=new THREE.Mesh(new THREE.BoxGeometry(...size),material); m.position.set(...pos); m.castShadow=true; m.receiveShadow=true; parent.add(m); return m; }
   function cylinder(parent, radius, length, material, pos, axis='x') { const m=new THREE.Mesh(new THREE.CylinderGeometry(radius,radius,length,20),material); if(axis==='x')m.rotation.z=Math.PI/2; if(axis==='z')m.rotation.x=Math.PI/2; m.position.set(...pos);m.castShadow=true;parent.add(m);return m; }
@@ -36,7 +43,7 @@ export async function createMachine3DView(container, statusEl) {
         box(g,[6,13,6],dark,[sx*w*.39,-.5,sz*d*.31]);
         box(g,[12,2,10],steel,[sx*w*.39,-7.5,sz*d*.31]);
       }
-      box(g,[w-8,3,d-10],belt,[0,12,0]);
+      const bm=belt.clone();bm.map=beltTex.clone();bm.map.needsUpdate=true;bm.map.repeat.set(w/16,1);g.userData.beltMat=bm;box(g,[w-8,3,d-10],bm,[0,12,0]);
       const count=Math.max(2,Math.min(6,Math.round(w/60)));
       box(g,[w,3,4],dark,[0,15,-d/2+2]); box(g,[w,3,4],dark,[0,15,d/2-2]);
       for(const x of [-w*.45,w*.45]) for(const z of [-d/2+2.5,d/2-2.5]) cylinder(g,1.5,1.5,steel,[x,8,z],'z');
@@ -47,8 +54,14 @@ export async function createMachine3DView(container, statusEl) {
       box(g,[w*.45,5,d*.5],dark,[-w*.1,5,0]);
       for(let i=0;i<5;i++) box(g,[3,h*.45,d*.8],steel,[-w*.22+i*w*.1,Math.max(15,h*.3),0]);
     } else if(type==='cylinder') {
-      box(g,[w*.7,Math.max(10,h*.42),Math.max(12,d*.55)],blue,[-w*.12,Math.max(12,h*.25),0]);
-      const rod=cylinder(g,Math.max(3,h*.1),w*.42,steel,[w*.4,Math.max(12,h*.25),0]); rod.userData.role='cylinder-rod'; g.userData.rod=rod; const head=box(g,[8,h*.45,d*.65],orange,[w*.62,Math.max(12,h*.25),0]); g.userData.cylinderHead=head;
+      const cy=Math.max(12,h*.25), br=Math.max(8,h*.2), bl=w*.6, bx=-w*.15;
+      cylinder(g,br,bl,alu,[bx,cy,0]);
+      cylinder(g,br*1.15,6,dark,[bx-bl/2,cy,0]); cylinder(g,br*1.15,6,dark,[bx+bl/2,cy,0]);
+      cylinder(g,br*1.08,4,blue,[bx-bl*.25,cy,0]); cylinder(g,br*1.08,4,blue,[bx+bl*.25,cy,0]);
+      box(g,[bl*.8,3,br*1.6],dark,[bx,cy-br-1.5,0]);
+      cylinder(g,2.5,5,steel,[bx-bl*.38,cy+br+2,0],'y'); cylinder(g,2.5,5,steel,[bx+bl*.38,cy+br+2,0],'y');
+      const rod=cylinder(g,Math.max(3,br*.35),w*.42,chrome,[w*.4,cy,0]); rod.userData.role='cylinder-rod'; g.userData.rod=rod;
+      const head=box(g,[8,br*1.2,br*1.2],orange,[w*.62,cy,0]); g.userData.cylinderHead=head;
     } else if(type==='index_table') {
       cylinder(g,Math.max(14,w*.38),8,steel,[0,10,0],'y'); const tableTop=cylinder(g,Math.max(10,w*.29),5,blue,[0,16,0],'y'); g.userData.tableTop=tableTop;
       for(let i=0;i<4;i++){const a=i*Math.PI/2;box(g,[Math.max(8,w*.12),5,Math.max(8,w*.12)],orange,[Math.cos(a)*w*.24,21,Math.sin(a)*w*.24]);}
@@ -72,18 +85,21 @@ export async function createMachine3DView(container, statusEl) {
     for(const [tag,g] of meshes) if(!currentState[tag]) {machineRoot.remove(g);meshes.delete(tag);}
     const entries=Object.entries(currentState).filter(([,o])=>o&&o.type);
     for(const [tag,obj] of entries) {
-      let g=meshes.get(tag); if(!g||g.userData.type!==obj.type){if(g)machineRoot.remove(g);g=makeObject(tag,obj);g.userData.type=obj.type;meshes.set(tag,g);machineRoot.add(g);}
       const w=Math.max(18,Number(obj.width)||80), h=Math.max(12,Number(obj.height)||36);
+      let g=meshes.get(tag);
+      const dim=g&&g.userData.dimensions;
+      if(!g||g.userData.type!==obj.type||(tag!==transformTag&&dim&&(dim.w!==w||dim.h!==h))){if(g)machineRoot.remove(g);g=makeObject(tag,obj);g.userData.type=obj.type;meshes.set(tag,g);machineRoot.add(g);}
       if(tag!==transformTag) g.position.set((Number(obj.x)||0)+w/2,0,(Number(obj.y)||0)+h/2);
       if(tag!==transformTag) g.rotation.y=-(Number(obj.rotation)||0)*Math.PI/180;
       if(obj.type==='conveyor') {
+        if(g.userData.beltMat)g.userData.beltMat.map.offset.x=-(Number(obj.belt_phase)||0)/16;
         const pos=obj.box_positions||[], products=g.userData.products||(g.userData.products=[]); const travel=Math.max(1,w-(Number(obj.box_width)||22));
         while(products.length<pos.length) products.push(box(g,[Math.max(10,Number(obj.box_width)||22),Math.max(8,Number(obj.box_height)||14),Math.max(10,Math.max(22,h*.8)*.55)],productMat,[0,22,0]));
         products.forEach((p,i)=>{p.visible=i<pos.length;if(pos[i]!=null)p.position.x=-w/2+Math.min(travel,Math.max(0,pos[i]))+(Number(obj.box_width)||22)/2;});
         //g.children.forEach((m,i)=>{if(m.geometry?.type==='CylinderGeometry' && obj.running)m.rotation.x += .025;});
         g.children.forEach(m=>{if(m.geometry?.type==='CylinderGeometry'){m.rotation.z=-(Number(obj.belt_phase)||0)/Math.max(1,m.geometry.parameters.radiusTop); if(obj.running_status||obj.running) m.rotation.z += animationTime*.0008;}});
       }
-      if(obj.type==='cylinder') {const rod=g.userData.rod; if(rod){const progress=Math.max(0,Math.min(1,Number(obj.progress ?? (obj.extended?1:0)))); rod.position.x=w*.18+progress*w*.2;}}
+      if(obj.type==='cylinder') {const rod=g.userData.rod,head=g.userData.cylinderHead; if(rod){const progress=Math.max(0,Math.min(1,Number(obj.progress ?? (obj.extended?1:0)))); rod.position.x=w*.18+progress*w*.2; if(head)head.position.x=rod.position.x+w*.21+4;}}
       const active=!!(obj.running_status ?? obj.running) && !obj.fault && !obj.emergency_stop;
       if(g.userData.rotor){g.userData.rotor.rotation.x=active?animationTime*.002:0; if(g.userData.shaft)g.userData.shaft.rotation.x=active?animationTime*.002:0;}
       if(g.userData.sensorLight){const detected=!!obj.detected;g.userData.sensorLight.material=detected?green:steel;g.userData.sensorLight.scale.setScalar(detected?1.18:1);if(g.userData.sensorZone)g.userData.sensorZone.material.opacity=detected?.38:.12;}
