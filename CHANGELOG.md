@@ -1,3 +1,11 @@
+## v11.23 — 3D conveyor roller and cylinder motion correction
+- Rebuilt conveyor roller layout as evenly spaced transverse rollers across the belt width, rather than four small cylinders at the corners.
+- Corrected roller animation to rotate each roller about its own longitudinal axis and stop when the conveyor is stopped, faulted, or emergency-stopped.
+- Reworked pneumatic-cylinder geometry to align with the backend's local X-axis and normalized progress range; the exposed rod now grows from the gland toward the configured extension limit, and its end head follows the rod tip.
+- Hardened 3D drag initiation with pointer capture, touch-action suppression, and prevention of the same pointer-down starting a second interaction.
+- Bumped frontend/module cache versions.
+- Validation: 64 Python tests passed; JavaScript syntax and Python compilation passed. Browser interaction testing was not available.
+
 ## v11.22 — 3D layout editing and industrial detail
 - Added direct drag-to-reposition for existing 3D components in Design mode, with 10-unit layout snapping and saved X/Y coordinates.
 - Added a 90-degree rotate-selected control in the 3D toolbar, routed through the existing component property system.

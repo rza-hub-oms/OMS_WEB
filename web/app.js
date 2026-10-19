@@ -436,7 +436,8 @@ const PROPERTY_FIELDS = {
     { key: "width", send: "width", label: "Width", type: "number", min: 8, max: 200, suffix: " px" },
     { key: "height", send: "height", label: "Height", type: "number", min: 8, max: 200, suffix: " px" },
     { key: "mode", send: "mode", label: "Mode", type: "select", options: [["NO", "Normally Open"], ["NC", "Normally Closed"]] },
-    { key: "watch_tag", send: "watch_target", label: "Watch Component", type: "component-select" },
+    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "1", suffix: " °" },
+    { key: "detection_distance", send: "detection_distance", label: "Detection Distance", type: "number", min: 0, max: 2000, step: "1", suffix: " px" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
   push_button: [
@@ -577,6 +578,7 @@ function buildSimulationControls(obj) {
     controls.push(button("■ Stop", "running", "0", "sim-stop"));
     controls.push(button("Forward", "direction", "1"));
     controls.push(button("Reverse", "direction", "0"));
+    controls.push(`<label class="sim-speed">Speed <input type="number" min="0" max="5000" step="any" data-sim-speed value="${obj.speed ?? 0}"></label>`);
   } else if (obj.type === "sensor") {
     controls.push(`<button type="button" class="sim-control sim-start" data-sensor-input="1">Force ON</button>`);
     controls.push(`<button type="button" class="sim-control sim-stop" data-sensor-input="0">Force OFF</button>`);
@@ -737,6 +739,12 @@ function renderPropertyPanel() {
     button.addEventListener("click", () => {
       if (!isSimulationMode() || !selectedTag) return;
       sendSetPoint(selectedTag, button.dataset.simPoint, button.dataset.simValue);
+    });
+  });
+  propertyBody.querySelectorAll("[data-sim-speed]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!isSimulationMode() || !selectedTag) return;
+      sendSetPoint(selectedTag, "speed", input.value);
     });
   });
   propertyBody.querySelectorAll("[data-sensor-input]").forEach((button) => {
@@ -1607,17 +1615,13 @@ document.getElementById("sequence-machine-cycle-btn")?.addEventListener("click",
   const cylinders = objects.filter(([, obj]) => obj.type === "cylinder");
   const sensors = objects.filter(([, obj]) => obj.type === "sensor");
   if (!conveyors.length || !cylinders.length || sensors.length < 2) {
-    alert("Full Machine Cycle needs at least one conveyor, one cylinder, and two sensors. Configure one sensor to watch the conveyor and another to watch the cylinder's end position.");
+    alert("Full Machine Cycle needs at least one conveyor, one cylinder, and two sensors. Place one sensor so its beam crosses the conveyor and another so its beam covers the cylinder's end position.");
     return;
   }
   const [conveyorTag] = conveyors[0];
   const [cylinderTag, cylinder] = cylinders[0];
-  const partSensorEntry = sensors.find(([tag, obj]) => obj.watch_tag === conveyorTag) || sensors[0];
-  const limitSensorEntry = sensors.find(([tag, obj]) => obj.watch_tag === cylinderTag && tag !== partSensorEntry[0]);
-  if (!limitSensorEntry) {
-    alert(`Configure a second sensor's Watch Target to ${cylinderTag} (cylinder end-position detection), then create the cycle again.`);
-    return;
-  }
+  const partSensorEntry = sensors[0];
+  const limitSensorEntry = sensors[1];
   const [partSensorTag] = partSensorEntry;
   const [limitSensorTag] = limitSensorEntry;
   const actions = (run) => {
@@ -1878,7 +1882,7 @@ function setMachine3dEnabled(enabled) {
   machine3dToggle.setAttribute("aria-pressed", String(machine3dEnabled));
   if (!machine3dEnabled) return;
   if (!machine3dLoadPromise) {
-    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=2").then(async mod => {
+    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=6").then(async mod => {
       machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
       machine3d.update(latestState);
       machine3d.setInteractionHandler((tag, phase) => {

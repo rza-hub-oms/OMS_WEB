@@ -12,6 +12,8 @@ class SensorBehavior(SimObject):
     NORMALLY_OPEN = "NO"
     NORMALLY_CLOSED = "NC"
     DEFAULT_MODE = NORMALLY_OPEN
+    DEFAULT_DETECTION_DISTANCE = 40.0
+    MAX_DETECTION_DISTANCE = 2000.0
 
     def __init__(
         self,
@@ -43,7 +45,11 @@ class SensorBehavior(SimObject):
 
         # Design-time configuration
         self.mode = self.DEFAULT_MODE
-        self.watch_tag = None
+        # Beam leaves the sensor along its rotation direction
+        # (0=+X, 90=+Y, 180=-X, 270=-Y). Distance is measured from the
+        # sensor's front face, in layout pixels.
+        self.rotation = 0.0
+        self.detection_distance = self.DEFAULT_DETECTION_DISTANCE
 
     # ---------- Size ----------
 
@@ -65,6 +71,37 @@ class SensorBehavior(SimObject):
     def get_height(self):
         return self.height
 
+    # ---------- Beam ----------
+
+    def set_rotation_value(self, value):
+        self.rotation = float(value) % 360.0
+
+    def get_rotation_value(self):
+        return self.rotation
+
+    def set_detection_distance(self, value):
+        self.detection_distance = max(
+            0.0, min(self.MAX_DETECTION_DISTANCE, float(value))
+        )
+
+    def get_detection_distance(self):
+        return self.detection_distance
+
+    def get_beam_segment(self):
+        """Return (x0, y0, x1, y1): the beam as a line segment starting at
+        the centre of the sensor's front face and running detection_distance
+        along the rotation angle (any angle, 0=+X, 90=+Y)."""
+        import math
+
+        ang = math.radians(self.rotation)
+        dx, dy = math.cos(ang), math.sin(ang)
+        cx = self.x + self.width / 2.0
+        cy = self.y + self.height / 2.0
+        half = self.width / 2.0
+        x0 = cx + dx * half
+        y0 = cy + dy * half
+        return (x0, y0, x0 + dx * self.detection_distance, y0 + dy * self.detection_distance)
+
     # ---------- Detection mode ----------
 
     def set_mode(self, mode):
@@ -80,10 +117,9 @@ class SensorBehavior(SimObject):
         return self.mode
 
     def set_watch_target(self, tag_name):
-        self.watch_tag = tag_name if tag_name else None
-
-    def get_watch_target(self):
-        return self.watch_tag
+        """Deprecated: sensors detect anything in their beam. Kept so old
+        saved projects still load; the value is ignored."""
+        pass
 
     # ---------- Runtime detection ----------
 
@@ -156,11 +192,12 @@ class SensorBehavior(SimObject):
             "y": self.y,
             "width": self.width,
             "height": self.height,
+            "rotation": self.rotation,
+            "detection_distance": self.detection_distance,
             "layer": self.layer,
 
             "detected": self.get_detected(),
             "mode": self.mode,
-            "watch_tag": self.watch_tag,
             "input_override": self.input_override,
 
             "_io_points": {

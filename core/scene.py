@@ -197,9 +197,7 @@ class Scene:
         for other in self.objects.values():
             if getattr(other, "parent_tag", None) == tag_name:
                 other.parent_tag = new_name
-            if isinstance(other, SensorBehavior) and other.watch_tag == tag_name:
-                other.watch_tag = new_name
-            elif isinstance(other, CylinderBehavior) and other.target_tag == tag_name:
+            if isinstance(other, CylinderBehavior) and other.target_tag == tag_name:
                 other.target_tag = new_name
 
         for connection in self.connections:
@@ -368,78 +366,110 @@ class Scene:
             if handler is not None:
                 handler(obj, target)
                             
+    @staticmethod
+    def _conveyor_box_polys(conveyor):
+        """World-space corner polygons of the boxes on a conveyor,
+        honoring the conveyor's rotation (matches the renderer layout)."""
+        import math
+
+        box_w = getattr(conveyor, "box_width", 0.0)
+        box_h = getattr(conveyor, "box_height", None)
+        if box_h is None:
+            box_h = min(24.0, conveyor.height - 4.0)
+        travel = max(0.0, conveyor.width - box_w)
+        cx = conveyor.x + conveyor.width / 2.0
+        cy = conveyor.y + conveyor.height / 2.0
+        ang = math.radians(getattr(conveyor, "rotation", 0.0) or 0.0)
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        top = conveyor.y + (conveyor.height - box_h) / 2.0
+
+        rects = []
+        for pos in getattr(conveyor, "box_positions", None) or []:
+            left = conveyor.x + min(pos, travel)
+            poly = []
+            for px, py in (
+                (left, top), (left + box_w, top),
+                (left + box_w, top + box_h), (left, top + box_h),
+            ):
+                dx, dy = px - cx, py - cy
+                poly.append((cx + dx * cos_a - dy * sin_a,
+                             cy + dx * sin_a + dy * cos_a))
+            rects.append(poly)
+        return rects
+
+    @staticmethod
+    def _segment_hits_polygon(seg, poly) -> bool:
+        """True if line segment seg=(x0,y0,x1,y1) touches the convex polygon."""
+        x0, y0, x1, y1 = seg
+        dx, dy = x1 - x0, y1 - y0
+        # Orient polygon counter-clockwise (shoelace) for inside tests.
+        area = sum(poly[i][0] * poly[(i + 1) % len(poly)][1]
+                   - poly[(i + 1) % len(poly)][0] * poly[i][1]
+                   for i in range(len(poly)))
+        pts = poly if area >= 0 else poly[::-1]
+        t0, t1 = 0.0, 1.0
+        for i in range(len(pts)):
+            ax, ay = pts[i]
+            bx, by = pts[(i + 1) % len(pts)]
+            ex, ey = bx - ax, by - ay
+            # inside when cross(edge, p - a) >= 0
+            num = ex * (y0 - ay) - ey * (x0 - ax)
+            den = ex * dy - ey * dx
+            if abs(den) < 1e-12:
+                if num < 0:
+                    return False
+                continue
+            t = -num / den
+            if den > 0:
+                t0 = max(t0, t)
+            else:
+                t1 = min(t1, t)
+            if t0 > t1:
+                return False
+        return True
+
     def _update_sensors(self) -> None:
-        """Update sensor detection for conveyors and cylinders.
+        """Update sensor detection.
 
-        Conveyor sensors detect moving boxes as before.
-
-        Cylinder sensors detect the cylinder's physical detectable zones.
-        In particular, the piston zone moves with cylinder progress, so
-        placing a sensor over the rear/front piston position gives a
-        retracted/extended limit-switch style signal.
+        A sensor detects anything physically inside its beam (sensor body
+        plus detection distance): moving conveyor boxes and the detectable
+        zones of cylinders (the piston zone moves with cylinder progress, so
+        a sensor near the rear/front position works as a limit switch).
         """
         for obj in self.objects.values():
             if not isinstance(obj, SensorBehavior):
                 continue
 
-            target = self.objects.get(obj.watch_tag)
-            if target is None:
-                obj.set_detected(False)
-                continue
+            seg = obj.get_beam_segment()
+            detected = False
 
-            # Conveyor detection: sensor overlaps a moving box.
-            if isinstance(target, ConveyorBehavior):
-                box_positions = getattr(target, "box_positions", None)
-                if not box_positions:
-                    obj.set_detected(False)
+            for target in self.objects.values():
+                if target is obj:
                     continue
 
-                box_width = getattr(target, "box_width", 0.0)
-                conveyor_top = target.y
-                conveyor_bottom = target.y + target.height
+                if isinstance(target, ConveyorBehavior):
+                    box_positions = getattr(target, "box_positions", None)
+                    if not box_positions:
+                        continue
+                    for poly in self._conveyor_box_polys(target):
+                        if self._segment_hits_polygon(seg, poly):
+                            detected = True
+                            break
 
-                vertical_overlap = (
-                    conveyor_top < obj.y + obj.height
-                    and conveyor_bottom > obj.y
-                )
-
-                detected = False
-                if vertical_overlap:
-                    for pos in box_positions:
-                        box_left = target.x + pos
-                        box_right = box_left + box_width
-
-                        if (
-                            box_left < obj.x + obj.width
-                            and box_right > obj.x
+                elif isinstance(target, CylinderBehavior):
+                    for zone in target.get_detectable_zone_bounds():
+                        zx0, zy0 = zone["x"], zone["y"]
+                        zx1, zy1 = zx0 + zone["width"], zy0 + zone["height"]
+                        if self._segment_hits_polygon(
+                            seg, [(zx0, zy0), (zx1, zy0), (zx1, zy1), (zx0, zy1)]
                         ):
                             detected = True
                             break
 
-                obj.set_detected(detected)
-                continue
+                if detected:
+                    break
 
-            # Cylinder detection: overlap the sensor with either of the
-            # cylinder's physical detectable zones.  The piston zone is
-            # position-dependent, which makes this work as a limit switch.
-            if isinstance(target, CylinderBehavior):
-                detected = False
-
-                for zone in target.get_detectable_zone_bounds():
-                    if (
-                        zone["x"] < obj.x + obj.width
-                        and zone["x"] + zone["width"] > obj.x
-                        and zone["y"] < obj.y + obj.height
-                        and zone["y"] + zone["height"] > obj.y
-                    ):
-                        detected = True
-                        break
-
-                obj.set_detected(detected)
-                continue
-
-            # Unknown/non-detectable target type.
-            obj.set_detected(False)
+            obj.set_detected(detected)
 
     def alarm_snapshot(self) -> dict:
         """Return current alarm definitions, active alarms and history."""

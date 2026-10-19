@@ -1,4 +1,4 @@
-# OMS Web
+## Latest 3D motion correction (v11.23)\n\nThe 3D view now renders conveyor rollers as transverse rollers spaced along the belt and spins them around their own axes when the conveyor is available and running. Pneumatic cylinder rods follow the backend cylinder geometry and normalized extension progress, with the rod end moving in the local positive X direction before component rotation. 3D component dragging also uses pointer capture to make drag gestures more reliable.\n\n# OMS Web
 
 OMS Web is a browser-based machine simulation and virtual-commissioning environment with PLC integration.
 

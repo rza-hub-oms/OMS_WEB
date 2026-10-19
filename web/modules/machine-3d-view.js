@@ -44,31 +44,87 @@ export async function createMachine3DView(container, statusEl) {
         box(g,[12,2,10],steel,[sx*w*.39,-7.5,sz*d*.31]);
       }
       const bm=belt.clone();bm.map=beltTex.clone();bm.map.needsUpdate=true;bm.map.repeat.set(w/16,1);g.userData.beltMat=bm;box(g,[w-8,3,d-10],bm,[0,12,0]);
-      const count=Math.max(2,Math.min(6,Math.round(w/60)));
       box(g,[w,3,4],dark,[0,15,-d/2+2]); box(g,[w,3,4],dark,[0,15,d/2-2]);
-      for(const x of [-w*.45,w*.45]) for(const z of [-d/2+2.5,d/2-2.5]) cylinder(g,1.5,1.5,steel,[x,8,z],'z');
-      const rollers=[]; g.children.forEach(m=>{if(m.geometry?.type==='CylinderGeometry') rollers.push(m);}); g.userData.rollers=rollers;
+      // Real conveyor rollers run across the belt (Z axis) and are spaced
+      // along its travel direction (X). Their long axis is the cylinder's
+      // local Y axis after the X rotation, so animation must spin locally
+      // around that axis rather than overwriting world Euler Z.
+      const rollerCount=Math.max(4,Math.min(32,Math.floor((w-12)/18)));
+      const rollers=[];
+      for(let i=0;i<rollerCount;i++){
+        const x=-w/2+6+(w-12)*(i/(rollerCount-1));
+        const roller=cylinder(g,2.1,Math.max(12,d-9),chrome,[x,9.9,0],'z');
+        roller.userData.role='conveyor-roller';
+        rollers.push(roller);
+      }
+      g.userData.rollers=rollers;
       const products=[]; for(let i=0;i<Math.min(8,(obj.box_positions||[]).length);i++) products.push(box(g,[Math.max(10,Number(obj.box_width)||22),Math.max(8,Number(obj.box_height)||14),Math.max(10,d*.55)],productMat,[0,22,0])); g.userData.products=products;
     } else if(type==='motor') {
-      const rotor=cylinder(g,Math.max(10,h*.28),Math.max(22,w*.65),blue,[0,Math.max(14,h*.3),0]); rotor.userData.role='motor-rotor'; const shaft=cylinder(g,Math.max(4,h*.12),Math.max(10,w*.28),steel,[w*.42,Math.max(14,h*.3),0]); shaft.userData.role='motor-shaft'; g.userData.rotor=rotor; g.userData.shaft=shaft;
-      box(g,[w*.45,5,d*.5],dark,[-w*.1,5,0]);
-      for(let i=0;i<5;i++) box(g,[3,h*.45,d*.8],steel,[-w*.22+i*w*.1,Math.max(15,h*.3),0]);
+      // Industrial IEC-style motor. Local X is the shaft axis (shaft points to +X).
+      const cy=Math.max(15,h*.32), R=Math.max(9,Math.min(h*.3,d*.38));
+      // mounting feet
+      const footTop=cy-R+2;
+      box(g,[w*.5,4,d*.75],dark,[-w*.08,2,0]);
+      box(g,[w*.42,footTop-4,R*1.1],steel,[-w*.08,4+(footTop-4)/2,0]);
+      for(const sz of [-1,1]) for(const sx of [-1,1]) cylinder(g,2,5,chrome,[-w*.08+sx*w*.2,5,sz*d*.3],'y');
+      // main stator housing + cooling fins
+      cylinder(g,R,w*.5,blue,[-w*.08,cy,0]);
+      for(let i=0;i<8;i++) cylinder(g,R*1.07,1.6,mat(0x1d6fa8,.4,.4),[-w*.08-w*.22+i*(w*.44/7),cy,0]);
+      // drive-end bell, rear end cap
+      cylinder(g,R*1.1,w*.1,alu,[w*.2,cy,0]);
+      cylinder(g,R*1.04,w*.1,dark,[-w*.38,cy,0]);
+      // terminal box with lid on top
+      box(g,[w*.2,R*.55,R*1.0],dark,[-w*.08,cy+R+R*.2,0]);
+      box(g,[w*.17,2,R*.8],steel,[-w*.08,cy+R+R*.5,0]);
+      // nameplate
+      box(g,[w*.14,R*.5,.8],chrome,[w*.0,cy+R*.2,R*.99+.3]);
+      // rotating shaft (with key) -- spins about its own X axis
+      const shaftG=new THREE.Group(); shaftG.position.set(w*.25,cy,0); g.add(shaftG);
+      cylinder(shaftG,Math.max(3,R*.3),w*.25,chrome,[w*.125,0,0]);
+      box(shaftG,[w*.12,2,2],steel,[w*.14,Math.max(3,R*.3),0]);
+      // rotating cooling fan at the rear
+      const fanG=new THREE.Group(); fanG.position.set(-w*.46,cy,0); g.add(fanG);
+      cylinder(fanG,R*.28,w*.06,steel,[0,0,0]);
+      for(let i=0;i<6;i++){const p=new THREE.Group();p.rotation.x=i*Math.PI/3;fanG.add(p);box(p,[w*.035,R*.7,R*.35],orange,[0,R*.55,0]);}
+      cylinder(g,R*.98,1.5,steel,[-w*.495,cy,0]);
+      g.userData.rotor=shaftG; g.userData.shaft=fanG;
     } else if(type==='cylinder') {
-      const cy=Math.max(12,h*.25), br=Math.max(8,h*.2), bl=w*.6, bx=-w*.15;
+      // Match CylinderBehavior._geometry(): local X points from the rear
+      // cap toward the rod tip; the group origin is the footprint center.
+      const cy=Math.max(12,h*.25), br=Math.max(8,h*.2), bl=w*.62, bx=-w*.19;
       cylinder(g,br,bl,alu,[bx,cy,0]);
-      cylinder(g,br*1.15,6,dark,[bx-bl/2,cy,0]); cylinder(g,br*1.15,6,dark,[bx+bl/2,cy,0]);
-      cylinder(g,br*1.08,4,blue,[bx-bl*.25,cy,0]); cylinder(g,br*1.08,4,blue,[bx+bl*.25,cy,0]);
+      cylinder(g,br*1.15,Math.max(4,w*.055),dark,[bx-bl/2,cy,0]);
+      const glandW=Math.max(7,w*.065);
+      const rodMin=w*.62-glandW*.25;
+      const rodMax=w-w*.025;
+      const rodTravel=Math.max(1,rodMax-rodMin);
+      const rodBaseX=rodMin-w/2;
+      cylinder(g,br*1.15,glandW,dark,[w*.12,cy,0]);
       box(g,[bl*.8,3,br*1.6],dark,[bx,cy-br-1.5,0]);
-      cylinder(g,2.5,5,steel,[bx-bl*.38,cy+br+2,0],'y'); cylinder(g,2.5,5,steel,[bx+bl*.38,cy+br+2,0],'y');
-      const rod=cylinder(g,Math.max(3,br*.35),w*.42,chrome,[w*.4,cy,0]); rod.userData.role='cylinder-rod'; g.userData.rod=rod;
-      const head=box(g,[8,br*1.2,br*1.2],orange,[w*.62,cy,0]); g.userData.cylinderHead=head;
+      cylinder(g,2.5,5,steel,[bx-bl*.38,cy+br+2,0],'y');
+      cylinder(g,2.5,5,steel,[bx+bl*.38,cy+br+2,0],'y');
+      // The rod's exposed length grows from zero to the backend's full
+      // rod travel. Its tip therefore follows the same normalized progress
+      // and direction as the 2D renderer and physical model.
+      const rod=cylinder(g,Math.max(3,br*.35),rodTravel,chrome,[rodBaseX,cy,0]);
+      rod.userData.role='cylinder-rod'; rod.userData.maxTravel=rodTravel;
+      rod.userData.baseX=rodBaseX; rod.userData.rodMin=rodMin; g.userData.rod=rod;
+      const head=box(g,[Math.max(6,w*.05),br*1.2,br*1.2],orange,[rodBaseX,cy,0]);
+      g.userData.cylinderHead=head; g.userData.rodTravel=rodTravel;
     } else if(type==='index_table') {
       cylinder(g,Math.max(14,w*.38),8,steel,[0,10,0],'y'); const tableTop=cylinder(g,Math.max(10,w*.29),5,blue,[0,16,0],'y'); g.userData.tableTop=tableTop;
       for(let i=0;i<4;i++){const a=i*Math.PI/2;box(g,[Math.max(8,w*.12),5,Math.max(8,w*.12)],orange,[Math.cos(a)*w*.24,21,Math.sin(a)*w*.24]);}
     } else if(type==='sensor') {
-      box(g,[w,4,h],steel,[0,2,0]); const sensorLight=box(g,[Math.min(w,h)*.4,10,Math.min(w,h)*.4],green,[0,9,0]); sensorLight.userData.role='sensor-light'; g.userData.sensorLight=sensorLight;
-      const zone=new THREE.Mesh(new THREE.BoxGeometry(w,30,h),new THREE.MeshBasicMaterial({color:0x4a9fbe,transparent:true,opacity:.18,depthWrite:false}));
-      zone.position.set(0,19,0); zone.userData.zone=true; zone.raycast=()=>{}; g.add(zone); g.userData.sensorZone=zone;
+      // Single emitter (no receiver). A fixed red beam leaves the front face
+      // along the sensor's +X direction; its length follows detection_distance.
+      const sy=20;
+      box(g,[8,2,8],steel,[0,4,0]);
+      cylinder(g,1.6,sy-4,steel,[0,4+(sy-4)/2,0],'y');
+      box(g,[w*.8,7,Math.min(h*.8,12)],dark,[0,sy,0]);
+      cylinder(g,1.5,.8,mat(0x0b2a4a,.9,.1),[w*.4+.4,sy,0],'x');
+      const beamMat=new THREE.MeshBasicMaterial({color:0xff3b3b,transparent:true,opacity:.7,depthWrite:false});
+      const beam=cylinder(g,.7,1,beamMat,[w*.4+.5,sy,0],'x'); beam.raycast=()=>{}; beam.castShadow=false; g.userData.sensorBeam=beam;
+      const sensorLight=cylinder(g,1.6,1.6,green,[0,sy+4.3,0],'y'); sensorLight.userData.role='sensor-light'; g.userData.sensorLight=sensorLight;
     } else if(type==='tower_light') {
       cylinder(g,Math.max(5,w*.12),Math.max(10,h*.6),steel,[0,Math.max(8,h*.3),0],'y');
       const lamps=[]; [red,blue,green,yellow].forEach((m,i)=>{const lamp=cylinder(g,Math.max(5,w*.14),Math.max(6,h*.13),m,[0,Math.max(12,h*.54)+i*7,0],'y'); lamps.push(lamp);}); g.userData.lamps=lamps;
@@ -96,13 +152,28 @@ export async function createMachine3DView(container, statusEl) {
         const pos=obj.box_positions||[], products=g.userData.products||(g.userData.products=[]); const travel=Math.max(1,w-(Number(obj.box_width)||22));
         while(products.length<pos.length) products.push(box(g,[Math.max(10,Number(obj.box_width)||22),Math.max(8,Number(obj.box_height)||14),Math.max(10,Math.max(22,h*.8)*.55)],productMat,[0,22,0]));
         products.forEach((p,i)=>{p.visible=i<pos.length;if(pos[i]!=null)p.position.x=-w/2+Math.min(travel,Math.max(0,pos[i]))+(Number(obj.box_width)||22)/2;});
-        //g.children.forEach((m,i)=>{if(m.geometry?.type==='CylinderGeometry' && obj.running)m.rotation.x += .025;});
-        g.children.forEach(m=>{if(m.geometry?.type==='CylinderGeometry'){m.rotation.z=-(Number(obj.belt_phase)||0)/Math.max(1,m.geometry.parameters.radiusTop); if(obj.running_status||obj.running) m.rotation.z += animationTime*.0008;}});
+        const rollerSpeed=(obj.running_status||obj.running)&&!obj.fault&&!obj.emergency_stop
+          ? (Number(obj.speed)||0)*0.00012*(obj.direction_forward===false?-1:1) : 0;
+        for(const roller of (g.userData.rollers||[])){
+          // rotate around each roller's own cylinder axis; the axis is local Y
+          // (mapped to world Z by the roller's initial X rotation).
+          if(rollerSpeed) roller.rotateY(rollerSpeed);
+        }
       }
-      if(obj.type==='cylinder') {const rod=g.userData.rod,head=g.userData.cylinderHead; if(rod){const progress=Math.max(0,Math.min(1,Number(obj.progress ?? (obj.extended?1:0)))); rod.position.x=w*.18+progress*w*.2; if(head)head.position.x=rod.position.x+w*.21+4;}}
+      if(obj.type==='cylinder') {
+        const rod=g.userData.rod,head=g.userData.cylinderHead;
+        if(rod){
+          const progress=Math.max(0,Math.min(1,Number(obj.progress ?? (obj.extended?1:0))));
+          const travel=g.userData.rodTravel||rod.userData.maxTravel||0;
+          const exposed=travel*progress;
+          rod.scale.y=progress;
+          rod.position.x=(rod.userData.baseX||0)+exposed/2;
+          if(head)head.position.x=(rod.userData.baseX||0)+exposed+Math.max(3,w*.025);
+        }
+      }
       const active=!!(obj.running_status ?? obj.running) && !obj.fault && !obj.emergency_stop;
-      if(g.userData.rotor){g.userData.rotor.rotation.x=active?animationTime*.002:0; if(g.userData.shaft)g.userData.shaft.rotation.x=active?animationTime*.002:0;}
-      if(g.userData.sensorLight){const detected=!!obj.detected;g.userData.sensorLight.material=detected?green:steel;g.userData.sensorLight.scale.setScalar(detected?1.18:1);if(g.userData.sensorZone)g.userData.sensorZone.material.opacity=detected?.38:.12;}
+      if(g.userData.rotor){g.userData.spinRate=active?(obj.direction_forward===false?-1:1)*Math.min(Number(obj.speed)||0,1500)*.00002:0;}
+      if(g.userData.sensorLight){const detected=!!obj.detected;g.userData.sensorLight.material=detected?green:steel;g.userData.sensorLight.scale.setScalar(detected?1.18:1);const bm=g.userData.sensorBeam;if(bm){const dist=Math.max(.01,Number(obj.detection_distance)||0),x0=w*.4+.5;bm.scale.y=dist;bm.position.x=x0+dist/2;}}
       if(g.userData.actuator){const pressed=!!(obj.pressed ?? obj.on);g.userData.actuator.position.y=Math.max(8,h*.35)-(pressed?3:0);if(obj.type==='toggle_switch')g.userData.actuator.rotation.z=pressed?-.45:.45;}
       if(g.userData.lamps){const lampKeys=['red','blue','green','yellow'];g.userData.lamps.forEach((lamp,i)=>{const on=!!obj[lampKeys[i]];lamp.material=on?[red,blue,green,yellow][i]:dimLampMats[i];});}
       if(g.userData.tableTop && obj.moving)g.userData.tableTop.rotation.y=animationTime*.0015;
@@ -118,13 +189,21 @@ export async function createMachine3DView(container, statusEl) {
   function resetCamera(){target.set(300,0,200);radius=650;theta=Math.PI/4;phi=Math.PI/3;placeCamera();}
   resetCamera();
   let dragging=false,lastX=0,lastY=0;
+  renderer.domElement.style.touchAction='none';
   renderer.domElement.addEventListener('pointerdown',e=>{if(e.button!==0)return;
     const tag=pick(e.clientX,e.clientY);
     if(tag && transformHandlers?.canStart?.(tag,e)) {
       const g=meshes.get(tag), p=groundPoint(e.clientX,e.clientY);
-      if(g&&p){transformTag=tag;transformOffset={x:g.position.x-p.x,z:g.position.z-p.z};transformMoved=false;dragging=false;renderer.domElement.style.cursor='grabbing';e.preventDefault();return;}
+      if(g&&p){
+        transformTag=tag;transformOffset={x:g.position.x-p.x,z:g.position.z-p.z};transformMoved=false;dragging=false;
+        renderer.domElement.style.cursor='grabbing';
+        try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();e.stopImmediatePropagation();return;
+      }
     }
-    dragging=true;lastX=e.clientX;lastY=e.clientY;});
+    dragging=true;lastX=e.clientX;lastY=e.clientY;
+    try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+  });
   window.addEventListener('pointermove',e=>{
     if(transformTag){if(!(e.buttons&1)){finishTransform();return;}const p=groundPoint(e.clientX,e.clientY),g=meshes.get(transformTag);if(!p||!g)return;
       const x=Math.round((p.x+transformOffset.x-g.userData.dimensions.w/2)/10)*10;
@@ -179,6 +258,6 @@ export async function createMachine3DView(container, statusEl) {
 
   function resize(){const w=Math.max(1,container.clientWidth),h=Math.max(1,container.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
   const ro=new ResizeObserver(resize);ro.observe(container);resize();
-  let raf=0;function loop(t=0){raf=requestAnimationFrame(loop);animationTime=t;renderer.render(scene,camera);}loop();
+  let raf=0;function loop(t=0){raf=requestAnimationFrame(loop);const dt=Math.min(50,t-animationTime);animationTime=t;for(const m of meshes.values()){const r=m.userData.spinRate;if(r){if(m.userData.rotor)m.userData.rotor.rotation.x+=r*dt;if(m.userData.shaft)m.userData.shaft.rotation.x+=r*dt;}}renderer.render(scene,camera);}loop();
   return {update,resetCamera,screenToLayout,setSelectedTag(tag){selectedTag=tag||null;},setPickHandler(f){onPick=f;},setInteractionHandler(f){onInteract=f;},setTransformHandler(h){transformHandlers=h;},rotateSelected(degrees=90){const g=meshes.get(selectedTag);if(!g)return false;g.rotation.y-=degrees*Math.PI/180;return true;},destroy(){cancelAnimationFrame(raf);ro.disconnect();renderer.dispose();container.replaceChildren();}};
 }

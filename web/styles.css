@@ -3246,3 +3246,6 @@ body.panel-fullscreen .panel-fullscreen-close { display: inline-block; }
 #machine-3d-stage { transition: outline-color .12s ease, background-color .12s ease; }
 #machine-3d-stage.drag-over { outline: 2px dashed #58b6f2; outline-offset: -5px; background-color: #2a739022; }
 #machine-3d-stage.drag-over::after { content: "DROP COMPONENT TO ADD TO MACHINE"; position: absolute; z-index: 5; top: 50%; left: 50%; transform: translate(-50%,-50%); padding: 12px 18px; border: 1px solid #58b6f2; border-radius: 6px; background: #102334e8; color: #eaf7ff; font-size: 12px; font-weight: 700; letter-spacing: .08em; pointer-events: none; }
+
+.sim-speed { display:flex; align-items:center; gap:6px; font-size:12px; }
+.sim-speed input { width:80px; }

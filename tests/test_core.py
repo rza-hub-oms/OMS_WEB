@@ -119,7 +119,6 @@ class ProjectTests(unittest.TestCase):
         sensor = scene.create_component("sensor", 20, 0)
         cylinder = scene.create_component("cylinder", 40, 0)
 
-        sensor.set_watch_target(conveyor.tag_name)
         cylinder.set_target_tag(conveyor.tag_name)
         scene.plc_mapping = [{
             "object_tag": conveyor.tag_name,
@@ -130,7 +129,6 @@ class ProjectTests(unittest.TestCase):
         self.assertTrue(scene.rename_component("Conveyor_1", "MainConveyor"))
         self.assertNotIn("Conveyor_1", scene.objects)
         self.assertIn("MainConveyor", scene.objects)
-        self.assertEqual(sensor.watch_tag, "MainConveyor")
         self.assertEqual(cylinder.target_tag, "MainConveyor")
         self.assertEqual(scene.plc_mapping[0]["object_tag"], "MainConveyor")
 
