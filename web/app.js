@@ -4,7 +4,8 @@ import { renderConveyor } from "./modules/conveyor-renderer.js";
 import { renderCylinder } from "./modules/cylinder-renderer.js";
 import { renderMotor } from "./modules/motor-renderer.js";
 import { renderIndexTable } from "./modules/index-table-renderer.js";
-import { renderSensor } from "./modules/sensor-renderer.js";
+import { renderSensor } from "./modules/sensor-renderer.js?v=2";
+import { renderPhotoelectricSensor } from "./modules/photoelectric-sensor-renderer.js?v=1";
 import { renderPushButton } from "./modules/push-button-renderer.js";
 import { renderEmergencyPushButton } from "./modules/emergency-push-button-renderer.js";
 import { renderToggleSwitch } from "./modules/toggle-switch-renderer.js";
@@ -411,7 +412,7 @@ const PROPERTY_FIELDS = {
     // (core/scene.py) currently has a handler for. Add a type here only
     // once its handler exists server-side -- offering a target with no
     // handler would let it be selected but silently do nothing.
-    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor", "sensor", "push_button"] },
+    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor", "sensor", "photoelectric_sensor", "push_button"] },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
     { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
     { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
@@ -438,6 +439,16 @@ const PROPERTY_FIELDS = {
     { key: "mode", send: "mode", label: "Mode", type: "select", options: [["NO", "Normally Open"], ["NC", "Normally Closed"]] },
     { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "1", suffix: " °" },
     { key: "detection_distance", send: "detection_distance", label: "Detection Distance", type: "number", min: 0, max: 2000, step: "1", suffix: " px" },
+    { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
+  ],
+  photoelectric_sensor: [
+    { key: "x", send: "x", label: "X", type: "number", step: "0.1", suffix: " px" },
+    { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
+    { key: "width", send: "width", label: "Width", type: "number", min: 8, max: 200, suffix: " px" },
+    { key: "height", send: "height", label: "Height", type: "number", min: 8, max: 200, suffix: " px" },
+    { key: "mode", send: "mode", label: "Mode", type: "select", options: [["NO", "Normally Open"], ["NC", "Normally Closed"]] },
+    { key: "rotation", send: "rotation_value", label: "Rotation", type: "number", min: 0, max: 359.9, step: "1", suffix: " °" },
+    { key: "detection_distance", send: "detection_distance", label: "Beam Distance", type: "number", min: 0, max: 2000, step: "1", suffix: " px" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
   ],
   push_button: [
@@ -504,6 +515,7 @@ const STATUS_FIELDS = {
   motor: [["running", "Run Command"], ["running_status", "Effective Running"], ["speed", "Speed"], ["current", "Current (A)"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   index_table: [["running", "Run Command"], ["running_status", "Effective Running"], ["step", "Current Step"], ["stations", "Clocks"], ["moving", "Indexing"], ["in_position", "In Position"], ["cycle_count", "Revolutions"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   sensor: [["detected", "Detected"], ["input_override", "Simulation Input Override"]],
+  photoelectric_sensor: [["detected", "Detected"], ["input_override", "Simulation Input Override"]],
   push_button: [["pressed", "Pressed"]],
   emergency_push_button: [["pressed", "Pressed"]],
   toggle_switch: [["on", "On"]],
@@ -579,7 +591,7 @@ function buildSimulationControls(obj) {
     controls.push(button("Forward", "direction", "1"));
     controls.push(button("Reverse", "direction", "0"));
     controls.push(`<label class="sim-speed">Speed <input type="number" min="0" max="5000" step="any" data-sim-speed value="${obj.speed ?? 0}"></label>`);
-  } else if (obj.type === "sensor") {
+  } else if (obj.type === "sensor" || obj.type === "photoelectric_sensor") {
     controls.push(`<button type="button" class="sim-control sim-start" data-sensor-input="1">Force ON</button>`);
     controls.push(`<button type="button" class="sim-control sim-stop" data-sensor-input="0">Force OFF</button>`);
     controls.push(`<button type="button" class="sim-control" data-sensor-input="auto">Auto / Physical</button>`);
@@ -626,7 +638,12 @@ function renderPropertyPanel() {
     return;
   }
 
-  const fields = PROPERTY_FIELDS[obj.type] || [];
+  const typeFields = PROPERTY_FIELDS[obj.type] || [];
+  const yFieldIndex = typeFields.findIndex((field) => field.key === "y");
+  const altitudeField = { key: "z", send: "z", label: "Z", type: "number", step: "0.1", suffix: " px" };
+  const fields = yFieldIndex < 0
+    ? [...typeFields, altitudeField]
+    : [...typeFields.slice(0, yFieldIndex + 1), altitudeField, ...typeFields.slice(yFieldIndex + 1)];
   const statusFields = STATUS_FIELDS[obj.type] || [];
 
   const statusHtml = statusFields
@@ -1572,7 +1589,7 @@ document.getElementById("sequence-add-btn")?.addEventListener("click", () => {
   markDirty(); send({ action: "set_sequences", sequences: latestSequences }); renderSequences();
 });
 document.getElementById("sequence-demo-btn")?.addEventListener("click", () => {
-  const sensors = Object.entries(latestState).filter(([, obj]) => obj.type === "sensor").map(([tag]) => tag);
+  const sensors = Object.entries(latestState).filter(([, obj]) => obj.type === "sensor" || obj.type === "photoelectric_sensor").map(([tag]) => tag);
   const conveyors = Object.entries(latestState).filter(([, obj]) => obj.type === "conveyor").map(([tag]) => tag);
   if (!sensors.length || !conveyors.length) {
     alert("Add at least one sensor and one conveyor before creating the demo sequence.");
@@ -1613,7 +1630,7 @@ document.getElementById("sequence-machine-cycle-btn")?.addEventListener("click",
   const conveyors = objects.filter(([, obj]) => obj.type === "conveyor");
   const motors = objects.filter(([, obj]) => obj.type === "motor");
   const cylinders = objects.filter(([, obj]) => obj.type === "cylinder");
-  const sensors = objects.filter(([, obj]) => obj.type === "sensor");
+  const sensors = objects.filter(([, obj]) => obj.type === "sensor" || obj.type === "photoelectric_sensor");
   if (!conveyors.length || !cylinders.length || sensors.length < 2) {
     alert("Full Machine Cycle needs at least one conveyor, one cylinder, and two sensors. Place one sensor so its beam crosses the conveyor and another so its beam covers the cylinder's end position.");
     return;
@@ -1882,7 +1899,7 @@ function setMachine3dEnabled(enabled) {
   machine3dToggle.setAttribute("aria-pressed", String(machine3dEnabled));
   if (!machine3dEnabled) return;
   if (!machine3dLoadPromise) {
-    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=6").then(async mod => {
+    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=10").then(async mod => {
       machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
       machine3d.update(latestState);
       machine3d.setInteractionHandler((tag, phase) => {
@@ -2011,7 +2028,7 @@ function dashboardMachineStatus(obj) {
     if (obj.fault) return ["FAULT", "fault"];
     return ["READY", "stopped"];
   }
-  if (obj.type === "sensor") return obj.detected ? ["ACTIVE", "active"] : ["READY", "stopped"];
+  if (obj.type === "sensor" || obj.type === "photoelectric_sensor") return obj.detected ? ["ACTIVE", "active"] : ["READY", "stopped"];
   if (obj.type === "emergency_push_button") return obj.pressed ? ["PRESSED", "fault"] : ["READY", "stopped"];
   if (obj.type === "push_button" || obj.type === "toggle_switch") return obj.pressed || obj.value ? ["ON", "active"] : ["OFF", "stopped"];
   return ["READY", "stopped"];
@@ -2678,6 +2695,7 @@ function render(state) {
     else if (obj.type === "motor") renderMotor(tagName, obj, deps);
     else if (obj.type === "index_table") renderIndexTable(tagName, obj, deps);
     else if (obj.type === "sensor") renderSensor(tagName, obj, deps);
+    else if (obj.type === "photoelectric_sensor") renderPhotoelectricSensor(tagName, obj, deps);
     else if (obj.type === "push_button") renderPushButton(tagName, obj, deps);
     else if (obj.type === "emergency_push_button") renderEmergencyPushButton(tagName, obj, deps);
     else if (obj.type === "toggle_switch") renderToggleSwitch(tagName, obj, deps);
@@ -2837,6 +2855,7 @@ const TYPE_BADGE = {
   motor: { label: "MO", color: "#3cce80" },
   index_table: { label: "IT", color: "#e0a030" },
   sensor: { label: "SE", color: "#a259d9" },
+  photoelectric_sensor: { label: "PE", color: "#e05454" },
   push_button: { label: "PB", color: "#4aa3df" },
   emergency_push_button: { label: "EP", color: "#f35361" },
   toggle_switch: { label: "TS", color: "#2eb8a3" },
@@ -2849,7 +2868,8 @@ const TYPE_LABEL = {
   cylinder: "Cylinder",
   motor: "Motor",
   index_table: "Index table",
-  sensor: "Sensor",
+  sensor: "Inductive Sensor",
+  photoelectric_sensor: "Photoelectric Sensor",
   push_button: "Push button",
   emergency_push_button: "Emergency PB",
   toggle_switch: "Toggle switch",
@@ -2865,6 +2885,7 @@ const STATUS_FIELD = {
   index_table: "running",
   cylinder: "extended",
   sensor: "detected",
+  photoelectric_sensor: "detected",
   push_button: "pressed",
   emergency_push_button: "pressed",
   toggle_switch: "on",

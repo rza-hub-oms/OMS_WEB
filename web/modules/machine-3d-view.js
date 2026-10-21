@@ -115,19 +115,36 @@ export async function createMachine3DView(container, statusEl) {
       cylinder(g,Math.max(14,w*.38),8,steel,[0,10,0],'y'); const tableTop=cylinder(g,Math.max(10,w*.29),5,blue,[0,16,0],'y'); g.userData.tableTop=tableTop;
       for(let i=0;i<4;i++){const a=i*Math.PI/2;box(g,[Math.max(8,w*.12),5,Math.max(8,w*.12)],orange,[Math.cos(a)*w*.24,21,Math.sin(a)*w*.24]);}
     } else if(type==='sensor') {
-      // Single emitter (no receiver). A fixed red beam leaves the front face
-      // along the sensor's +X direction; its length follows detection_distance.
+      // Inductive proximity sensor: threaded metallic barrel and sensing face.
+      cylinder(g,Math.max(4,Math.min(w,h)*.27),Math.max(12,w*.7),alu,[0,12,0],'x');
+      cylinder(g,Math.max(5,Math.min(w,h)*.31),4,dark,[w*.34,12,0],'x');
+      cylinder(g,Math.max(4,Math.min(w,h)*.24),2,blue,[w*.4,12,0],'x');
+      const range=new THREE.Mesh(new THREE.RingGeometry(.985,1,64),new THREE.MeshBasicMaterial({color:0x4ade80,transparent:true,opacity:.16,side:THREE.DoubleSide,depthWrite:false}));
+      range.rotation.x=-Math.PI/2; range.position.y=1; range.raycast=()=>{}; g.add(range); g.userData.proximityRange=range;
+      const sensorLight=cylinder(g,1.6,1.6,green,[0,20,0],'y'); sensorLight.userData.role='sensor-light'; g.userData.sensorLight=sensorLight;
+    } else if(type==='photoelectric_sensor') {
+      // Photoelectric emitter with a visible directional red beam.
       const sy=20;
       box(g,[8,2,8],steel,[0,4,0]);
       cylinder(g,1.6,sy-4,steel,[0,4+(sy-4)/2,0],'y');
-      box(g,[w*.8,7,Math.min(h*.8,12)],dark,[0,sy,0]);
-      cylinder(g,1.5,.8,mat(0x0b2a4a,.9,.1),[w*.4+.4,sy,0],'x');
+      box(g,[w,7,Math.min(h*.8,12)],dark,[0,sy,0]);
+      cylinder(g,1.5,.8,mat(0x0b2a4a,.9,.1),[w*.5+.4,sy,0],'x');
       const beamMat=new THREE.MeshBasicMaterial({color:0xff3b3b,transparent:true,opacity:.7,depthWrite:false});
       const beam=cylinder(g,.7,1,beamMat,[w*.4+.5,sy,0],'x'); beam.raycast=()=>{}; beam.castShadow=false; g.userData.sensorBeam=beam;
       const sensorLight=cylinder(g,1.6,1.6,green,[0,sy+4.3,0],'y'); sensorLight.userData.role='sensor-light'; g.userData.sensorLight=sensorLight;
     } else if(type==='tower_light') {
       cylinder(g,Math.max(5,w*.12),Math.max(10,h*.6),steel,[0,Math.max(8,h*.3),0],'y');
-      const lamps=[]; [red,blue,green,yellow].forEach((m,i)=>{const lamp=cylinder(g,Math.max(5,w*.14),Math.max(6,h*.13),m,[0,Math.max(12,h*.54)+i*7,0],'y'); lamps.push(lamp);}); g.userData.lamps=lamps;
+      // Give each lens its own vertical segment. Fixed 7-unit spacing caused
+      // the lenses to overlap whenever the tower height exceeded ~54 units.
+      const lampLength=Math.max(5,h*.08), lampGap=Math.max(1,h*.012);
+      const lampSpacing=lampLength+lampGap, stackBottom=Math.max(12,h*.61);
+      const lamps=[];
+      [red,blue,green,yellow].forEach((m,i)=>{
+        const y=stackBottom+lampLength/2+i*lampSpacing;
+        const lamp=cylinder(g,Math.max(5,w*.14),lampLength,m,[0,y,0],'y');
+        lamps.push(lamp);
+      });
+      g.userData.lamps=lamps;
     } else if(type==='push_button'||type==='emergency_push_button'||type==='toggle_switch') {
       box(g,[Math.max(20,w*.65),7,Math.max(20,d*.65)],dark,[0,4,0]); const actuator=cylinder(g,Math.max(6,w*.18),Math.max(8,h*.4),type==='emergency_push_button'?red:type==='toggle_switch'?steel:green,[0,Math.max(12,h*.35),0],'y'); actuator.userData.role='control-actuator'; g.userData.actuator=actuator;
     } else {
@@ -145,7 +162,7 @@ export async function createMachine3DView(container, statusEl) {
       let g=meshes.get(tag);
       const dim=g&&g.userData.dimensions;
       if(!g||g.userData.type!==obj.type||(tag!==transformTag&&dim&&(dim.w!==w||dim.h!==h))){if(g)machineRoot.remove(g);g=makeObject(tag,obj);g.userData.type=obj.type;meshes.set(tag,g);machineRoot.add(g);}
-      if(tag!==transformTag) g.position.set((Number(obj.x)||0)+w/2,0,(Number(obj.y)||0)+h/2);
+      if(tag!==transformTag) g.position.set((Number(obj.x)||0)+w/2,Number(obj.z)||0,(Number(obj.y)||0)+h/2);
       if(tag!==transformTag) g.rotation.y=-(Number(obj.rotation)||0)*Math.PI/180;
       if(obj.type==='conveyor') {
         if(g.userData.beltMat)g.userData.beltMat.map.offset.x=-(Number(obj.belt_phase)||0)/16;
@@ -172,8 +189,9 @@ export async function createMachine3DView(container, statusEl) {
         }
       }
       const active=!!(obj.running_status ?? obj.running) && !obj.fault && !obj.emergency_stop;
+      if(g.userData.proximityRange){const radius=Math.max(0,Number(obj.detection_distance)||0);g.userData.proximityRange.scale.set(radius||.001,1,radius||.001);}
       if(g.userData.rotor){g.userData.spinRate=active?(obj.direction_forward===false?-1:1)*Math.min(Number(obj.speed)||0,1500)*.00002:0;}
-      if(g.userData.sensorLight){const detected=!!obj.detected;g.userData.sensorLight.material=detected?green:steel;g.userData.sensorLight.scale.setScalar(detected?1.18:1);const bm=g.userData.sensorBeam;if(bm){const dist=Math.max(.01,Number(obj.detection_distance)||0),x0=w*.4+.5;bm.scale.y=dist;bm.position.x=x0+dist/2;}}
+      if(g.userData.sensorLight){const detected=!!obj.detected;g.userData.sensorLight.material=detected?green:steel;g.userData.sensorLight.scale.setScalar(detected?1.18:1);const bm=g.userData.sensorBeam;if(bm){const dist=Math.max(.01,Number(obj.detection_distance)||0),x0=w*.5+.5;bm.scale.y=dist;bm.position.x=x0+dist/2;}}
       if(g.userData.actuator){const pressed=!!(obj.pressed ?? obj.on);g.userData.actuator.position.y=Math.max(8,h*.35)-(pressed?3:0);if(obj.type==='toggle_switch')g.userData.actuator.rotation.z=pressed?-.45:.45;}
       if(g.userData.lamps){const lampKeys=['red','blue','green','yellow'];g.userData.lamps.forEach((lamp,i)=>{const on=!!obj[lampKeys[i]];lamp.material=on?[red,blue,green,yellow][i]:dimLampMats[i];});}
       if(g.userData.tableTop && obj.moving)g.userData.tableTop.rotation.y=animationTime*.0015;

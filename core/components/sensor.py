@@ -4,6 +4,7 @@ from core.io import Signal
 
 class SensorBehavior(SimObject):
     TYPE = "sensor"
+    DETECTION_KIND = "inductive"
 
     DEFAULT_SIZE = 20.0
     MIN_ITEM_WIDTH = 8.0
@@ -97,7 +98,11 @@ class SensorBehavior(SimObject):
         dx, dy = math.cos(ang), math.sin(ang)
         cx = self.x + self.width / 2.0
         cy = self.y + self.height / 2.0
-        half = self.width / 2.0
+        hw, hh = self.width / 2.0, self.height / 2.0
+        half = min(
+            hw / abs(dx) if abs(dx) > 1e-9 else float("inf"),
+            hh / abs(dy) if abs(dy) > 1e-9 else float("inf"),
+        )
         x0 = cx + dx * half
         y0 = cy + dy * half
         return (x0, y0, x0 + dx * self.detection_distance, y0 + dy * self.detection_distance)
@@ -179,30 +184,39 @@ class SensorBehavior(SimObject):
             ),
         }
 
+    def to_dict(self):
+            io_points = self.get_plc_io_points()
+    
+            return {
+                "type": self.TYPE,
+                "tag_name": self.tag_name,
+    
+                "x": self.x,
+                "y": self.y,
+                "width": self.width,
+                "height": self.height,
+                "rotation": self.rotation,
+                "detection_distance": self.detection_distance,
+                "layer": self.layer,
+    
+                "detected": self.get_detected(),
+                "mode": self.mode,
+                "input_override": self.input_override,
+    
+                "_io_points": {
+                    point_name: setter is not None
+                    for point_name, (_getter, setter)
+                    in io_points.items()
+                },
+            }
+
+
+class PhotoelectricSensorBehavior(SensorBehavior):
+    """Directional through-beam/proximity photoelectric sensor."""
+
+    TYPE = "photoelectric_sensor"
+    DETECTION_KIND = "photoelectric"
+
     # ---------- Serialization ----------
 
-    def to_dict(self):
-        io_points = self.get_plc_io_points()
-
-        return {
-            "type": self.TYPE,
-            "tag_name": self.tag_name,
-
-            "x": self.x,
-            "y": self.y,
-            "width": self.width,
-            "height": self.height,
-            "rotation": self.rotation,
-            "detection_distance": self.detection_distance,
-            "layer": self.layer,
-
-            "detected": self.get_detected(),
-            "mode": self.mode,
-            "input_override": self.input_override,
-
-            "_io_points": {
-                point_name: setter is not None
-                for point_name, (_getter, setter)
-                in io_points.items()
-            },
-        }
+    

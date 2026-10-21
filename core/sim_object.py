@@ -12,6 +12,9 @@ class SimObject:
         self.tag_name = name
         self.x = x
         self.y = y
+        # Third-axis altitude. The 2D canvas remains a top-down projection;
+        # the 3D renderer maps this coordinate to world-space vertical Y.
+        self.z = 0.0
         self.width = width
         self.height = height
         self.layer = 0
@@ -37,6 +40,12 @@ class SimObject:
 
     def get_y(self) -> float:
         return self.y
+
+    def set_z(self, value: float) -> None:
+        self.z = float(value)
+
+    def get_z(self) -> float:
+        return self.z
 
     # Stacking order -- shared by every component type, used by the
     # Properties panel's Layer field and rendered as CSS z-index.

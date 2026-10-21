@@ -97,7 +97,7 @@ def scene_to_project_dict(scene, *, name="Untitled", metadata=None, production=N
         "version": PROJECT_VERSION,
         "name": name,
         "metadata": dict(metadata or {}),
-        "objects": [{**obj.to_dict(), "parent_tag": getattr(obj, "parent_tag", None)} for obj in scene.objects.values()],
+        "objects": [{**obj.to_dict(), "z": obj.get_z(), "parent_tag": getattr(obj, "parent_tag", None)} for obj in scene.objects.values()],
         "plc_mapping": list(scene.plc_mapping),
         "plc_connection": dict(scene.plc_connection),
         "type_counters": dict(scene._type_counters),

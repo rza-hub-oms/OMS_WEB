@@ -1144,7 +1144,38 @@ button:hover { background: #25445c; border-color: #3488c7; }
   user-select: none;
 }
 
-.sensor-body {
+.inductive-sensor-ui,
+.photoelectric-sensor-ui {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 8px;
+  min-height: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.inductive-range {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(74, 222, 128, .08);
+  border: 1px dashed rgba(74, 222, 128, .32);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.photoelectric-beam {
+  position: absolute;
+  z-index: -1;
+  height: 3px;
+  margin-top: -1.5px;
+  transform-origin: 0 50%;
+  background: rgba(255, 59, 59, .58);
+  box-shadow: 0 0 5px rgba(255, 59, 59, .45);
+  pointer-events: none;
+}
+
+.inductive-sensor-body,
+.photoelectric-body {
   position: absolute;
   inset: 0;
 
@@ -1157,9 +1188,29 @@ button:hover { background: #25445c; border-color: #3488c7; }
   border: 2px solid #111;
   border-radius: 4px;
   box-sizing: border-box;
+  transform: rotate(var(--sensor-rotation, 0deg));
 }
 
-.sensor-lens {
+.inductive-sensor-body {
+  inset: 12% 8%;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #a9bac5, #536674 48%, #2b3942);
+  border: 2px solid #17212a;
+}
+
+.inductive-sensor-face {
+  position: absolute;
+  left: -5%;
+  top: 15%;
+  width: 30%;
+  height: 70%;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #1e2a32, #d3dde2 45%, #60727e);
+  border: 1px solid #25333d;
+  box-sizing: border-box;
+}
+
+.photoelectric-lens {
   position: absolute;
   left: 20%;
   top: 20%;
@@ -1183,12 +1234,15 @@ button:hover { background: #25445c; border-color: #3488c7; }
   background: #333;
 }
 
-.sensor-ui.detected .sensor-led {
+.inductive-sensor-ui.detected .sensor-led,
+.photoelectric-sensor-ui.detected .sensor-led {
   background: #19ff19;
   box-shadow: 0 0 7px #19ff19;
 }
 
-.sensor-ui .tag {
+.sensor-ui .tag,
+.inductive-sensor-ui .tag,
+.photoelectric-sensor-ui .tag {
   position: absolute;
   left: 50%;
   top: 100%;

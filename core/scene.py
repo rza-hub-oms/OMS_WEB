@@ -12,7 +12,7 @@ Simulation cycle matches the original Qt app's ANIMATION_INTERVAL_MS
 from core.components.conveyor import ConveyorBehavior
 from core.components.cylinder import CylinderBehavior
 from core.components.motor import MotorBehavior
-from core.components.sensor import SensorBehavior
+from core.components.sensor import SensorBehavior, PhotoelectricSensorBehavior
 from core.components.push_button import PushButtonBehavior
 from core.components.push_button import PushButtonBehavior
 from core.components.emergency_push_button import EmergencyPushButtonBehavior
@@ -32,6 +32,7 @@ COMPONENT_REGISTRY = {
     "cylinder": CylinderBehavior,
     "motor": MotorBehavior,
     "sensor": SensorBehavior,
+    "photoelectric_sensor": PhotoelectricSensorBehavior,
     "push_button": PushButtonBehavior,
     "emergency_push_button": EmergencyPushButtonBehavior,
     "toggle_switch": ToggleSwitchBehavior,
@@ -218,7 +219,8 @@ class Scene:
             return None
 
         self._type_counters[component_type] = self._type_counters.get(component_type, 0) + 1
-        tag_name = f"{component_type.capitalize()}_{self._type_counters[component_type]}"
+        prefixes = {"photoelectric_sensor": "PhotoelectricSensor"}
+        tag_name = f"{prefixes.get(component_type, component_type.capitalize())}_{self._type_counters[component_type]}"
 
         obj = behavior_cls(tag_name, x=x, y=y)
         self.add(obj)
@@ -428,6 +430,50 @@ class Scene:
                 return False
         return True
 
+    @staticmethod
+    def _cylinder_polys(cyl) -> list:
+        g = cyl._geometry()
+        b = g["body"]
+        tip = g["rod_min"] + (g["rod_max"] - g["rod_min"]) * cyl.progress
+        rod_h = cyl.height * 0.3
+        mid = cyl.height / 2.0
+        rects = [
+            (b["x"], b["y"], b["x"] + b["width"], b["y"] + b["height"]),
+            (g["rod_min"], mid - rod_h / 2.0, max(tip, g["rod_min"]) + 2.0, mid + rod_h / 2.0),
+        ]
+        return [[cyl._local_to_scene(x, y) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+                for x0, y0, x1, y1 in rects]
+
+    @staticmethod
+    def _object_body_poly(obj) -> list:
+        """Body rectangle of any object as a polygon, rotated about its centre."""
+        import math
+        w, h = float(obj.width), float(obj.height)
+        cx, cy = obj.x + w / 2.0, obj.y + h / 2.0
+        a = math.radians(getattr(obj, "rotation", 0.0) or 0.0)
+        c, s = math.cos(a), math.sin(a)
+        return [(cx + dx * c - dy * s, cy + dx * s + dy * c)
+                for dx, dy in ((-w/2, -h/2), (w/2, -h/2), (w/2, h/2), (-w/2, h/2))]
+
+    @staticmethod
+    def _point_near_polygon(point, poly, distance) -> bool:
+        """Whether a point is inside a polygon or within distance of its edge."""
+        px, py = point
+        inside = False
+        min_distance_sq = float("inf")
+        for i, (ax, ay) in enumerate(poly):
+            bx, by = poly[(i + 1) % len(poly)]
+            if (ay > py) != (by > py):
+                cross_x = (bx - ax) * (py - ay) / (by - ay) + ax
+                if px < cross_x:
+                    inside = not inside
+            vx, vy = bx - ax, by - ay
+            length_sq = vx * vx + vy * vy
+            t = max(0.0, min(1.0, ((px - ax) * vx + (py - ay) * vy) / length_sq)) if length_sq else 0.0
+            dx, dy = px - (ax + t * vx), py - (ay + t * vy)
+            min_distance_sq = min(min_distance_sq, dx * dx + dy * dy)
+        return inside or min_distance_sq <= distance * distance
+
     def _update_sensors(self) -> None:
         """Update sensor detection.
 
@@ -440,8 +486,9 @@ class Scene:
             if not isinstance(obj, SensorBehavior):
                 continue
 
-            seg = obj.get_beam_segment()
             detected = False
+            seg = obj.get_beam_segment() if isinstance(obj, PhotoelectricSensorBehavior) else None
+            sensor_center = (obj.x + obj.width / 2.0, obj.y + obj.height / 2.0)
 
             for target in self.objects.values():
                 if target is obj:
@@ -452,19 +499,28 @@ class Scene:
                     if not box_positions:
                         continue
                     for poly in self._conveyor_box_polys(target):
-                        if self._segment_hits_polygon(seg, poly):
+                        hit = (self._segment_hits_polygon(seg, poly) if seg else
+                               self._point_near_polygon(sensor_center, poly, obj.detection_distance))
+                        if hit:
                             detected = True
                             break
 
                 elif isinstance(target, CylinderBehavior):
-                    for zone in target.get_detectable_zone_bounds():
-                        zx0, zy0 = zone["x"], zone["y"]
-                        zx1, zy1 = zx0 + zone["width"], zy0 + zone["height"]
-                        if self._segment_hits_polygon(
-                            seg, [(zx0, zy0), (zx1, zy0), (zx1, zy1), (zx0, zy1)]
-                        ):
+                    for poly in self._cylinder_polys(target):
+                        hit = (self._segment_hits_polygon(seg, poly) if seg else
+                               self._point_near_polygon(sensor_center, poly, obj.detection_distance))
+                        if hit:
                             detected = True
                             break
+
+                else:
+                    # Any other object (motor, index table, label, light,
+                    # buttons, ...): detect its rotated body rectangle.
+                    poly = self._object_body_poly(target)
+                    hit = (self._segment_hits_polygon(seg, poly) if seg else
+                           self._point_near_polygon(sensor_center, poly, obj.detection_distance))
+                    if hit:
+                        detected = True
 
                 if detected:
                     break
@@ -553,6 +609,7 @@ class Scene:
         result = {}
         for name, obj in self.objects.items():
             state = obj.to_dict()
+            state["z"] = obj.get_z() if hasattr(obj, "get_z") else 0.0
             state["parent_tag"] = getattr(obj, "parent_tag", None)
             result[name] = state
         return result
