@@ -1,10 +1,10 @@
-"""Behavior model for the directional photoelectric (photonic) sensor."""
+"""Photoelectric (photonic) sensor behavior."""
 
 from core.components.inductive_sensor import InductiveSensorBehavior
 
 
 class PhotoelectricSensorBehavior(InductiveSensorBehavior):
-    """Photoelectric sensor whose output is detected along a directional beam."""
+    """Directional sensor with a red beam and segment-based detection."""
 
     TYPE = "photoelectric_sensor"
     DETECTION_KIND = "photoelectric"

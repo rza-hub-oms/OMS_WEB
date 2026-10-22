@@ -1899,7 +1899,7 @@ function setMachine3dEnabled(enabled) {
   machine3dToggle.setAttribute("aria-pressed", String(machine3dEnabled));
   if (!machine3dEnabled) return;
   if (!machine3dLoadPromise) {
-    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=10").then(async mod => {
+    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=11").then(async mod => {
       machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
       machine3d.update(latestState);
       machine3d.setInteractionHandler((tag, phase) => {
@@ -1934,10 +1934,35 @@ function setMachine3dEnabled(enabled) {
         move: () => { machine3dStatus.textContent = "Moving component · release to save position"; },
         end: (tag, x, y) => {
           if (!isDesignMode()) return;
+          const dropped = latestState[tag];
+          if (!dropped) return;
+          const footprint = (obj, left = Number(obj.x) || 0, top = Number(obj.y) || 0) => {
+            const width = Math.max(18, Number(obj.width) || 80);
+            const height = Math.max(12, Number(obj.height) || 36);
+            const angle = (Number(obj.rotation) || 0) * Math.PI / 180;
+            const boundWidth = Math.abs(width * Math.cos(angle)) + Math.abs(height * Math.sin(angle));
+            const boundHeight = Math.abs(width * Math.sin(angle)) + Math.abs(height * Math.cos(angle));
+            return { left: left + width / 2 - boundWidth / 2, right: left + width / 2 + boundWidth / 2,
+              top: top + height / 2 - boundHeight / 2, bottom: top + height / 2 + boundHeight / 2 };
+          };
+          const droppedBounds = footprint(dropped, x, y);
+          let landingZ = Number(dropped.z) || 0;
+          for (const [otherTag, other] of Object.entries(latestState)) {
+            if (otherTag === tag || !other?.type) continue;
+            const bounds = footprint(other);
+            const overlaps = droppedBounds.left < bounds.right && droppedBounds.right > bounds.left
+              && droppedBounds.top < bounds.bottom && droppedBounds.bottom > bounds.top;
+            if (!overlaps) continue;
+            // Z is the 3D altitude. Place the dropped object above the top of
+            // every object whose floor-plane footprint it overlaps.
+            const otherTop = (Number(other.z) || 0) + Math.max(20, Number(other.height) || 36);
+            landingZ = Math.max(landingZ, otherTop + 1);
+          }
           pushHistory();
           markDirty();
           sendSetProperty(tag, "x", x);
           sendSetProperty(tag, "y", y);
+          if (landingZ !== (Number(dropped.z) || 0)) sendSetProperty(tag, "z", landingZ);
           machine3dStatus.textContent = "Position updated · drag components to reposition · rotate from toolbar";
         }
       });

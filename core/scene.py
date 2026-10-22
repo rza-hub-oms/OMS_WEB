@@ -9,10 +9,13 @@ Simulation cycle matches the original Qt app's ANIMATION_INTERVAL_MS
 (see project_structure.txt): 50 ms.
 """
 
+import math
+
 from core.components.conveyor import ConveyorBehavior
 from core.components.cylinder import CylinderBehavior
 from core.components.motor import MotorBehavior
-from core.components.sensor import SensorBehavior, PhotoelectricSensorBehavior
+from core.components.inductive_sensor import InductiveSensorBehavior, SensorBehavior
+from core.components.photoelectric_sensor import PhotoelectricSensorBehavior
 from core.components.push_button import PushButtonBehavior
 from core.components.push_button import PushButtonBehavior
 from core.components.emergency_push_button import EmergencyPushButtonBehavior
@@ -31,7 +34,7 @@ COMPONENT_REGISTRY = {
     "conveyor": ConveyorBehavior,
     "cylinder": CylinderBehavior,
     "motor": MotorBehavior,
-    "sensor": SensorBehavior,
+    "sensor": InductiveSensorBehavior,
     "photoelectric_sensor": PhotoelectricSensorBehavior,
     "push_button": PushButtonBehavior,
     "emergency_push_button": EmergencyPushButtonBehavior,
@@ -445,6 +448,27 @@ class Scene:
                 for x0, y0, x1, y1 in rects]
 
     @staticmethod
+    def _cylinder_piston_poly(cyl) -> list | None:
+        """Return only the moving internal piston marker, in scene coordinates.
+
+        Inductive limit sensors mounted along the cylinder barrel detect the
+        magnetic piston through the housing. They must not detect the fixed
+        cylinder body or exposed rod, which would keep the input on all the
+        time or make the rod tip act like a mechanical switch.
+        """
+        zone = next((item for item in cyl.get_detectable_zones() if item["type"] == "piston"), None)
+        if zone is None:
+            return None
+        x0, y0 = zone["x"], zone["y"]
+        x1, y1 = x0 + zone["width"], y0 + zone["height"]
+        return [
+            cyl._local_to_scene(x0, y0),
+            cyl._local_to_scene(x1, y0),
+            cyl._local_to_scene(x1, y1),
+            cyl._local_to_scene(x0, y1),
+        ]
+
+    @staticmethod
     def _object_body_poly(obj) -> list:
         """Body rectangle of any object as a polygon, rotated about its centre."""
         import math
@@ -477,10 +501,10 @@ class Scene:
     def _update_sensors(self) -> None:
         """Update sensor detection.
 
-        A sensor detects anything physically inside its beam (sensor body
-        plus detection distance): moving conveyor boxes and the detectable
-        zones of cylinders (the piston zone moves with cylinder progress, so
-        a sensor near the rear/front position works as a limit switch).
+        Photoelectric sensors detect anything crossing their beam. Inductive
+        sensors detect nearby parts; for cylinders they detect only the moving
+        piston zone, so barrel-mounted sensors work as end-position switches
+        without being held on by the fixed cylinder housing.
         """
         for obj in self.objects.values():
             if not isinstance(obj, SensorBehavior):
@@ -506,12 +530,35 @@ class Scene:
                             break
 
                 elif isinstance(target, CylinderBehavior):
-                    for poly in self._cylinder_polys(target):
-                        hit = (self._segment_hits_polygon(seg, poly) if seg else
-                               self._point_near_polygon(sensor_center, poly, obj.detection_distance))
-                        if hit:
-                            detected = True
-                            break
+                    if seg is None:
+                        # Inductive sensors mounted beside the barrel see
+                        # the moving magnetic piston, not the housing/rod.
+                        piston_poly = self._cylinder_piston_poly(target)
+                        # The 2D layout uses X/Y for the floor plane. Include
+                        # the separate altitude coordinate as the third axis;
+                        # the sensor's sensing face is at local height 12 and
+                        # the piston center follows CylinderBehavior's 3D model.
+                        sensor_height = float(getattr(obj, "z", 0.0)) + 12.0
+                        piston_height = float(getattr(target, "z", 0.0)) + max(
+                            12.0, float(target.height) * 0.25
+                        )
+                        vertical_gap = abs(sensor_height - piston_height)
+                        range_sq = float(obj.detection_distance) ** 2
+                        horizontal_range = (
+                            math.sqrt(max(0.0, range_sq - vertical_gap ** 2))
+                            if vertical_gap <= float(obj.detection_distance)
+                            else -1.0
+                        )
+                        detected = bool(
+                            piston_poly
+                            and horizontal_range >= 0.0
+                            and self._point_near_polygon(sensor_center, piston_poly, horizontal_range)
+                        )
+                    else:
+                        for poly in self._cylinder_polys(target):
+                            if self._segment_hits_polygon(seg, poly):
+                                detected = True
+                                break
 
                 else:
                     # Any other object (motor, index table, label, light,

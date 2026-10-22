@@ -13,6 +13,10 @@ export async function createMachine3DView(container, statusEl) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   container.replaceChildren(renderer.domElement);
+  const componentLabel = document.createElement('div');
+  componentLabel.className = 'machine-3d-component-label';
+  componentLabel.hidden = true;
+  container.appendChild(componentLabel);
   scene.add(new THREE.HemisphereLight(0xc8e3ff, 0x27313a, 2.0));
   const key = new THREE.DirectionalLight(0xffffff, 2.4); key.position.set(-400, 700, 500); key.castShadow = true; scene.add(key);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({color:0x182630, roughness:.92}));
@@ -120,7 +124,9 @@ export async function createMachine3DView(container, statusEl) {
       cylinder(g,Math.max(5,Math.min(w,h)*.31),4,dark,[w*.34,12,0],'x');
       cylinder(g,Math.max(4,Math.min(w,h)*.24),2,blue,[w*.4,12,0],'x');
       const range=new THREE.Mesh(new THREE.RingGeometry(.985,1,64),new THREE.MeshBasicMaterial({color:0x4ade80,transparent:true,opacity:.16,side:THREE.DoubleSide,depthWrite:false}));
-      range.rotation.x=-Math.PI/2; range.position.y=1; range.raycast=()=>{}; g.add(range); g.userData.proximityRange=range;
+      // The proximity field sits at the sensing face's height, following the
+      // sensor's configured altitude with the rest of its component group.
+      range.rotation.x=-Math.PI/2; range.position.y=12; range.raycast=()=>{}; g.add(range); g.userData.proximityRange=range;
       const sensorLight=cylinder(g,1.6,1.6,green,[0,20,0],'y'); sensorLight.userData.role='sensor-light'; g.userData.sensorLight=sensorLight;
     } else if(type==='photoelectric_sensor') {
       // Photoelectric emitter with a visible directional red beam.
@@ -196,7 +202,9 @@ export async function createMachine3DView(container, statusEl) {
       if(g.userData.lamps){const lampKeys=['red','blue','green','yellow'];g.userData.lamps.forEach((lamp,i)=>{const on=!!obj[lampKeys[i]];lamp.material=on?[red,blue,green,yellow][i]:dimLampMats[i];});}
       if(g.userData.tableTop && obj.moving)g.userData.tableTop.rotation.y=animationTime*.0015;
       if(g.userData.faultLamp)g.userData.faultLamp.visible=!!(obj.fault||obj.emergency_stop);
-      g.userData.isSelected=tag===selectedTag; g.scale.setScalar(tag===selectedTag?1.035:1);
+      // Selection is used by toolbar actions, but must not alter the rendered
+      // component. In particular, simulation and online clicks only open the
+      // inspector; they must not visually enlarge or move machine objects.
       g.userData.tag=tag;
     }
     statusEl.textContent=`${entries.length} machine components · ${entries.filter(([,o])=>o.running).length} running · drag components to move in Design mode · drag empty space to orbit · scroll to zoom`;
@@ -276,6 +284,17 @@ export async function createMachine3DView(container, statusEl) {
 
   function resize(){const w=Math.max(1,container.clientWidth),h=Math.max(1,container.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
   const ro=new ResizeObserver(resize);ro.observe(container);resize();
-  let raf=0;function loop(t=0){raf=requestAnimationFrame(loop);const dt=Math.min(50,t-animationTime);animationTime=t;for(const m of meshes.values()){const r=m.userData.spinRate;if(r){if(m.userData.rotor)m.userData.rotor.rotation.x+=r*dt;if(m.userData.shaft)m.userData.shaft.rotation.x+=r*dt;}}renderer.render(scene,camera);}loop();
+  function updateComponentLabel(){
+    const g=selectedTag&&meshes.get(selectedTag);
+    if(!g||!currentState[selectedTag]){componentLabel.hidden=true;return;}
+    const dim=g.userData.dimensions||{w:80,h:36};
+    const anchor=new THREE.Vector3(g.position.x,g.position.y+Math.max(30,dim.h*.45),g.position.z).project(camera);
+    if(anchor.z < -1 || anchor.z > 1){componentLabel.hidden=true;return;}
+    componentLabel.textContent=selectedTag;
+    componentLabel.style.left=`${(anchor.x+1)*container.clientWidth/2}px`;
+    componentLabel.style.top=`${(1-anchor.y)*container.clientHeight/2}px`;
+    componentLabel.hidden=false;
+  }
+  let raf=0;function loop(t=0){raf=requestAnimationFrame(loop);const dt=Math.min(50,t-animationTime);animationTime=t;for(const m of meshes.values()){const r=m.userData.spinRate;if(r){if(m.userData.rotor)m.userData.rotor.rotation.x+=r*dt;if(m.userData.shaft)m.userData.shaft.rotation.x+=r*dt;}}renderer.render(scene,camera);updateComponentLabel();}loop();
   return {update,resetCamera,screenToLayout,setSelectedTag(tag){selectedTag=tag||null;},setPickHandler(f){onPick=f;},setInteractionHandler(f){onInteract=f;},setTransformHandler(h){transformHandlers=h;},rotateSelected(degrees=90){const g=meshes.get(selectedTag);if(!g)return false;g.rotation.y-=degrees*Math.PI/180;return true;},destroy(){cancelAnimationFrame(raf);ro.disconnect();renderer.dispose();container.replaceChildren();}};
 }
