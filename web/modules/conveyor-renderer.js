@@ -34,7 +34,7 @@ export function renderConveyor(tagName, c, { getOrCreate, selectComponent, isDes
 
   const boxHeight = c.box_height ?? Math.min(24, c.height - 4);
   const travel = Math.max(0, c.width - c.box_width);
-  const positions = c.box_positions && c.box_positions.length ? c.box_positions : [0];
+  const positions = c.box_positions || [];
   const tagEl = el.querySelector(".tag");
 
   // Reconcile the number of .box-ui elements with the current number

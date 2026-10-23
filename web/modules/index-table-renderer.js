@@ -63,7 +63,13 @@ export function renderIndexTable(tagName, c, { getOrCreate, selectComponent, isD
   plate.setAttribute("transform", `rotate(${c.angle || 0})`);
   // Highlight the pocket under the fixed pointer (the current station).
   plate.querySelectorAll("g").forEach((g) =>
-    g.classList.toggle("active", Number(g.dataset.i) === (c.step || 1) - 1));
+    {
+      const i = Number(g.dataset.i);
+      // The table rotates clockwise in the 2D view, so the pocket under the
+      // fixed top pointer is the inverse of the current step offset.
+      g.classList.toggle("active", i === (n - (((c.step || 1) - 1) % n)) % n);
+      g.classList.toggle("occupied", !!c.station_parts?.[i]);
+    });
 
   el.querySelector(".it-step").textContent = `${c.step || 1}/${n}`;
   el.querySelector(".it-badge").textContent = c.running_status ? (c.moving ? "INDEXING" : "RUN") : "STOP";

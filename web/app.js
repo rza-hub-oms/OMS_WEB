@@ -393,7 +393,7 @@ const PROPERTY_FIELDS = {
     { key: "speed", send: "speed", label: "Speed", type: "number", min: 0, max: 5000, suffix: " mm/s" },
     { key: "box_width", send: "box_width", label: "Box Width", type: "number", min: 5, max: 200, suffix: " px" },
     { key: "box_height", send: "box_height", label: "Box Height", type: "number", min: 5, maxKey: "max_box_height", suffix: " px" },
-    { key: "box_count", send: "box_count", label: "Box Count", type: "number", min: 1, step: "1", maxKey: "max_box_count" },
+    { key: "box_count", send: "box_count", label: "Box Count", type: "number", min: 0, step: "1", maxKey: "max_box_count" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
     { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
     { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
@@ -412,7 +412,7 @@ const PROPERTY_FIELDS = {
     // (core/scene.py) currently has a handler for. Add a type here only
     // once its handler exists server-side -- offering a target with no
     // handler would let it be selected but silently do nothing.
-    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor", "sensor", "photoelectric_sensor", "push_button"] },
+    { key: "target_tag", send: "target_tag", label: "Interacts With", type: "component-select", filterTypes: ["conveyor", "sensor", "photoelectric_sensor", "push_button", "index_table"] },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
     { key: "fault", send: "fault", label: "Fault", type: "checkbox" },
     { key: "emergency_stop", send: "emergency_stop", label: "Emergency Stop", type: "checkbox" },
@@ -487,6 +487,8 @@ const PROPERTY_FIELDS = {
     { key: "y", send: "y", label: "Y", type: "number", step: "0.1", suffix: " px" },
     { key: "width", send: "width", label: "Diameter", type: "number", min: 60, max: 1000, suffix: " px" },
     { key: "stations", send: "stations", label: "Number of Clocks (Stations)", type: "number", min: 2, max: 24, step: "1" },
+    { key: "feed_conveyor_tag", send: "feed_conveyor_tag", label: "Infeed Conveyor", type: "component-select", filterTypes: ["conveyor"] },
+    { key: "outfeed_conveyor_tag", send: "outfeed_conveyor_tag", label: "Outfeed Conveyor", type: "component-select", filterTypes: ["conveyor"] },
     { key: "dwell_ms", send: "dwell_ms", label: "Dwell Time", type: "number", min: 0, max: 60000, step: "50", suffix: " ms" },
     { key: "move_ms", send: "move_ms", label: "Index Move Time", type: "number", min: 50, max: 10000, step: "50", suffix: " ms" },
     { key: "layer", send: "layer", label: "Layer", type: "number", step: "1", min: "0" },
@@ -513,7 +515,7 @@ const STATUS_FIELDS = {
   conveyor: [["running", "Run Command"], ["running_status", "Effective Running"], ["speed", "Speed"], ["direction_forward", "Forward Direction"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   cylinder: [["extended", "Extended"], ["progress", "Progress"], ["moving", "Moving"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   motor: [["running", "Run Command"], ["running_status", "Effective Running"], ["speed", "Speed"], ["current", "Current (A)"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
-  index_table: [["running", "Run Command"], ["running_status", "Effective Running"], ["step", "Current Step"], ["stations", "Clocks"], ["moving", "Indexing"], ["in_position", "In Position"], ["cycle_count", "Revolutions"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
+  index_table: [["running", "Run Command"], ["running_status", "Effective Running"], ["step", "Current Step"], ["stations", "Stations"], ["part_present", "Part at transfer position"], ["moving", "Indexing"], ["in_position", "In Position"], ["cycle_count", "Revolutions"], ["mode", "Mode"], ["fault", "Fault"], ["emergency_stop", "E-Stop"]],
   sensor: [["detected", "Detected"], ["input_override", "Simulation Input Override"]],
   photoelectric_sensor: [["detected", "Detected"], ["input_override", "Simulation Input Override"]],
   push_button: [["pressed", "Pressed"]],
@@ -585,6 +587,8 @@ function buildSimulationControls(obj) {
     controls.push(button("▶ Start", "running", "1", "sim-start"));
     controls.push(button("■ Stop", "running", "0", "sim-stop"));
     controls.push(`<button type="button" class="sim-control" data-sim-point="index" data-sim-value="1">Step ▸</button>`);
+    controls.push(`<button type="button" class="sim-control" data-sim-point="load_part" data-sim-value="1">Load part</button>`);
+    controls.push(`<button type="button" class="sim-control" data-sim-point="unload_part" data-sim-value="1">Unload part</button>`);
   } else if (obj.type === "conveyor" || obj.type === "motor") {
     controls.push(button("▶ Start", "running", "1", "sim-start"));
     controls.push(button("■ Stop", "running", "0", "sim-stop"));
@@ -755,7 +759,12 @@ function renderPropertyPanel() {
   propertyBody.querySelectorAll("[data-sim-point]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!isSimulationMode() || !selectedTag) return;
-      sendSetPoint(selectedTag, button.dataset.simPoint, button.dataset.simValue);
+      const tag = selectedTag;
+      const point = button.dataset.simPoint;
+      sendSetPoint(tag, point, button.dataset.simValue);
+      if (point === "load_part" || point === "unload_part") {
+        window.setTimeout(() => sendSetPoint(tag, point, "0"), 100);
+      }
     });
   });
   propertyBody.querySelectorAll("[data-sim-speed]").forEach((input) => {
@@ -1732,10 +1741,12 @@ function sendSetPoint(tagName, point, value) {
   send({ action: "set_point", tag_name: tagName, point, value });
 }
 
-function sendAddComponent(componentType, x, y) {
+function sendAddComponent(componentType, x, y, z = null) {
   pushHistory();
   markDirty();
-  send({ action: "add_component", component_type: componentType, x, y });
+  const command = { action: "add_component", component_type: componentType, x, y };
+  if (z !== null && Number.isFinite(Number(z))) command.z = Number(z);
+  send(command);
 }
 
 let currentFileHandle = null;
@@ -1899,7 +1910,7 @@ function setMachine3dEnabled(enabled) {
   machine3dToggle.setAttribute("aria-pressed", String(machine3dEnabled));
   if (!machine3dEnabled) return;
   if (!machine3dLoadPromise) {
-    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=11").then(async mod => {
+    machine3dLoadPromise = import("./modules/machine-3d-view.js?v=12").then(async mod => {
       machine3d = await mod.createMachine3DView(document.getElementById("machine-3d-stage"), machine3dStatus);
       machine3d.update(latestState);
       machine3d.setInteractionHandler((tag, phase) => {
@@ -1934,35 +1945,10 @@ function setMachine3dEnabled(enabled) {
         move: () => { machine3dStatus.textContent = "Moving component · release to save position"; },
         end: (tag, x, y) => {
           if (!isDesignMode()) return;
-          const dropped = latestState[tag];
-          if (!dropped) return;
-          const footprint = (obj, left = Number(obj.x) || 0, top = Number(obj.y) || 0) => {
-            const width = Math.max(18, Number(obj.width) || 80);
-            const height = Math.max(12, Number(obj.height) || 36);
-            const angle = (Number(obj.rotation) || 0) * Math.PI / 180;
-            const boundWidth = Math.abs(width * Math.cos(angle)) + Math.abs(height * Math.sin(angle));
-            const boundHeight = Math.abs(width * Math.sin(angle)) + Math.abs(height * Math.cos(angle));
-            return { left: left + width / 2 - boundWidth / 2, right: left + width / 2 + boundWidth / 2,
-              top: top + height / 2 - boundHeight / 2, bottom: top + height / 2 + boundHeight / 2 };
-          };
-          const droppedBounds = footprint(dropped, x, y);
-          let landingZ = Number(dropped.z) || 0;
-          for (const [otherTag, other] of Object.entries(latestState)) {
-            if (otherTag === tag || !other?.type) continue;
-            const bounds = footprint(other);
-            const overlaps = droppedBounds.left < bounds.right && droppedBounds.right > bounds.left
-              && droppedBounds.top < bounds.bottom && droppedBounds.bottom > bounds.top;
-            if (!overlaps) continue;
-            // Z is the 3D altitude. Place the dropped object above the top of
-            // every object whose floor-plane footprint it overlaps.
-            const otherTop = (Number(other.z) || 0) + Math.max(20, Number(other.height) || 36);
-            landingZ = Math.max(landingZ, otherTop + 1);
-          }
           pushHistory();
           markDirty();
           sendSetProperty(tag, "x", x);
           sendSetProperty(tag, "y", y);
-          if (landingZ !== (Number(dropped.z) || 0)) sendSetProperty(tag, "z", landingZ);
           machine3dStatus.textContent = "Position updated · drag components to reposition · rotate from toolbar";
         }
       });
@@ -2012,7 +1998,34 @@ machine3dStage.addEventListener("drop", (e) => {
   if (!componentType) return;
   const point = machine3d.screenToLayout(e.clientX, e.clientY);
   if (!point) return;
-  sendAddComponent(componentType, Math.max(0, point.x), Math.max(0, point.y));
+  const defaults = {
+    conveyor: [300, 70], cylinder: [150, 30], motor: [100, 55], index_table: [140, 140],
+    sensor: [20, 20], photoelectric_sensor: [20, 20], push_button: [20, 20],
+    emergency_push_button: [24, 24], toggle_switch: [50, 24], tower_light: [24, 90], label: [120, 40],
+  };
+  const [width, height] = defaults[componentType] || [80, 36];
+  const left = Math.max(0, point.x), top = Math.max(0, point.y);
+  const footprint = (obj, objLeft = Number(obj.x) || 0, objTop = Number(obj.y) || 0) => {
+    const w = Math.max(18, Number(obj.width) || 80), h = Math.max(12, Number(obj.height) || 36);
+    const angle = (Number(obj.rotation) || 0) * Math.PI / 180;
+    const bw = Math.abs(w * Math.cos(angle)) + Math.abs(h * Math.sin(angle));
+    const bh = Math.abs(w * Math.sin(angle)) + Math.abs(h * Math.cos(angle));
+    return { left: objLeft + w / 2 - bw / 2, right: objLeft + w / 2 + bw / 2,
+      top: objTop + h / 2 - bh / 2, bottom: objTop + h / 2 + bh / 2 };
+  };
+  const incoming = footprint({ width, height }, left, top);
+  let placementZ = 0;
+  for (const other of Object.values(latestState)) {
+    if (!other?.type) continue;
+    const bounds = footprint(other);
+    const overlaps = incoming.left < bounds.right && incoming.right > bounds.left
+      && incoming.top < bounds.bottom && incoming.bottom > bounds.top;
+    if (overlaps) placementZ = Math.max(placementZ,
+      (Number(other.z) || 0) + Math.max(20, Number(other.height) || 36) + 1);
+  }
+  // Stack only at the instant a new component is placed from the palette.
+  // Subsequent mouse moves preserve its assigned altitude.
+  sendAddComponent(componentType, left, top, placementZ);
 });
 
 document.getElementById("reset-view-btn").addEventListener("click", () => {

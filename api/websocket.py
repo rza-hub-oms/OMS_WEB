@@ -311,6 +311,7 @@ async def websocket_endpoint(ws: WebSocket):
                         command["component_type"],
                         command["x"],
                         command["y"],
+                        z=command.get("z", 0.0),
                     )
                     if obj is None:
                         logger.warning(

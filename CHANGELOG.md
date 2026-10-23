@@ -298,3 +298,8 @@
 - Enabled dragging components from the existing component palette directly into the 3D viewport while in Design mode.
 - Converts the drop location into machine-layout coordinates using a ray cast against the 3D ground plane, then uses the existing add-component flow so the new component persists in the simulation model.
 - Added a visible drop target highlight and placement prompt.
+## v11.24 — Stack on Initial 3D Placement Only
+
+- A newly palette-dropped component is placed above existing components when its footprint overlaps them in the 3D Design view.
+- Later mouse moves of that placed component preserve its current Z altitude; 2D placement does not auto-stack.
+

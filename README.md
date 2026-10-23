@@ -179,6 +179,12 @@ Open **Inspector → PLC Mapping → Pop out ↗** to work in a wide PLC Mapping
 
 Dialogs opened from the PLC Mapping workspace (including **Import DB Tags** and **Select PLC Address**) are layered above the workspace so they remain visible and usable. If an older stylesheet is cached, reload the page once with a hard refresh.
 
+## Rotary index table stations and parts
+
+The 3D carousel uses the configured station count and follows the simulated index angle. Station fixtures are empty until a part is loaded. In Simulation mode, select the table and use **Load part** / **Unload part** to update the pocket at the transfer position. PLC mappings can use `load_part` and `unload_part` as pulse commands; `part_present` reports whether that pocket contains a part. Set the table's **Infeed Conveyor** and **Outfeed Conveyor** properties to connect conveyors. A cylinder targeting the index table can push a conveyor box into the station facing it, or push an occupied station's part onto the configured outfeed conveyor. Configure the cylinder so its extended rod reaches the transfer side; a conveyor box is added at the closest free slot on the outfeed belt.
+
+For a simulated cylinder-fed infeed, set the index table's **Infeed Conveyor** property, set the cylinder's **Interacts With** target to the index table, then position the extended rod so it contacts a conveyor box at the table edge. When the cylinder completes an extension stroke, OMS transfers that box into the empty pocket facing the cylinder. For outfeed, set **Outfeed Conveyor** and use a cylinder on the discharge side; on its completed extension stroke, it transfers the occupied pocket facing the rod to the conveyor's nearest free slot. The table must be stopped and the cylinder/conveyor/table altitudes must align. Retract the cylinder before the next transfer. The handoff is modeled at the end of the stroke.
+
 
 
 ## Logic Editor workspace

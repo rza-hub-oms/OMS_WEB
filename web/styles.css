@@ -3176,6 +3176,7 @@ body.panel-fullscreen .panel-fullscreen-close { display: inline-block; }
 .it-step { fill: #e4edf5; font-size: 15px; font-weight: 700; }
 .it-pointer { fill: #f1b84b; }
 .it-plate g.active .it-pocket { fill: #1f6f52; stroke: #3cce80; }
+.it-plate g.occupied .it-pocket { fill: #ef9a35; stroke: #ffd089; stroke-width: 2.5; }
 .index-table-ui.running .it-base { stroke: #3cce80; }
 .index-table-ui.running { filter: drop-shadow(0 0 10px #34d39955); }
 .index-table-ui .it-badge { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 2px; font-size: 10px; letter-spacing: .06em; color: #91a4b5; }

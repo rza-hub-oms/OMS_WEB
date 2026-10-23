@@ -20,7 +20,7 @@ class ConveyorBehavior(SimObject):
     DEFAULT_BOX_WIDTH = 30
     DEFAULT_BOX_HEIGHT = 24
 
-    MIN_BOX_COUNT = 1
+    MIN_BOX_COUNT = 0
     DEFAULT_BOX_COUNT = 1
 
     BOX_HEIGHT_MARGIN = 2
@@ -123,7 +123,7 @@ class ConveyorBehavior(SimObject):
             # Restart from a clean, evenly-spaced state so a changed
             # count takes effect right away instead of waiting for
             # whatever boxes already exist to cycle out.
-            self.box_positions = [0.0]
+            self.box_positions = [0.0] if clamped > 0 else []
             self._spawn_accumulator = 0.0
 
     def get_box_count(self) -> int:
@@ -135,8 +135,8 @@ class ConveyorBehavior(SimObject):
         width."""
         travel = max(0.0, self.width - self.box_width)
         if travel <= 0 or self.box_width <= 0:
-            return self.MIN_BOX_COUNT
-        return max(self.MIN_BOX_COUNT, int(travel // self.box_width))
+            return 1
+        return max(1, int(travel // self.box_width))
 
     def get_max_box_count(self) -> int:
         """Public accessor for the Properties panel."""
@@ -179,7 +179,7 @@ class ConveyorBehavior(SimObject):
         spawn_pos = 0.0 if self.direction_forward else travel
 
         if travel <= 0:
-            self.box_positions = [0.0]
+            self.box_positions = [0.0] if self.box_count > 0 else self.box_positions
             self._spawn_accumulator = 0.0
             return
 
@@ -198,18 +198,19 @@ class ConveyorBehavior(SimObject):
         # so that many boxes stay evenly spread across the travel
         # distance, and recomputed every tick so it keeps tracking
         # box_count even if width/box_width change live.
-        spacing = travel / self.box_count
+        if self.box_count > 0:
+            spacing = travel / self.box_count
 
-        self._spawn_accumulator += abs(step)
-        while self._spawn_accumulator >= spacing:
-            self._spawn_accumulator -= spacing
-            self.box_positions.append(spawn_pos)
+            self._spawn_accumulator += abs(step)
+            while self._spawn_accumulator >= spacing:
+                self._spawn_accumulator -= spacing
+                self.box_positions.append(spawn_pos)
 
-        # Safety net: floating-point drift should never leave the belt
-        # fully empty for a tick.
-        if not self.box_positions:
-            self.box_positions = [spawn_pos]
-            self._spawn_accumulator = 0.0
+            # Safety net: floating-point drift should never leave the belt
+            # fully empty for a tick.
+            if not self.box_positions:
+                self.box_positions = [spawn_pos]
+                self._spawn_accumulator = 0.0
 
     # ---------- PLC I/O mapping (copied verbatim) ----------
 

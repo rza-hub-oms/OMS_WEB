@@ -24,7 +24,7 @@ export async function createMachine3DView(container, statusEl) {
   const grid = new THREE.GridHelper(2400, 60, 0x3b5262, 0x293b49); grid.position.y = -2.8; scene.add(grid);
   const machineRoot = new THREE.Group(); scene.add(machineRoot);
   const meshes = new Map(); let currentState = {}; let selectedTag = null; let animationTime = 0;
-  let transformHandlers = null; let transformTag = null; let transformOffset = null; let transformMoved = false;
+  let transformHandlers = null; let transformTag = null; let transformOffset = null; let transformStartPosition = null; let transformMoved = false;
   const mat = (color, metalness=.25, roughness=.55) => new THREE.MeshStandardMaterial({color, metalness, roughness});
   const steel=mat(0x8395a3,.72,.35), dark=mat(0x273744,.5,.45), blue=mat(0x2585c7,.35,.4), orange=mat(0xef9a35,.2,.5), green=mat(0x36b77b,.1,.45), red=mat(0xd84c4c,.1,.45), yellow=mat(0xe6c828,.1,.45);
   function canvasTex(draw,w,h){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=4;return t;}
@@ -116,8 +116,10 @@ export async function createMachine3DView(container, statusEl) {
       const head=box(g,[Math.max(6,w*.05),br*1.2,br*1.2],orange,[rodBaseX,cy,0]);
       g.userData.cylinderHead=head; g.userData.rodTravel=rodTravel;
     } else if(type==='index_table') {
-      cylinder(g,Math.max(14,w*.38),8,steel,[0,10,0],'y'); const tableTop=cylinder(g,Math.max(10,w*.29),5,blue,[0,16,0],'y'); g.userData.tableTop=tableTop;
-      for(let i=0;i<4;i++){const a=i*Math.PI/2;box(g,[Math.max(8,w*.12),5,Math.max(8,w*.12)],orange,[Math.cos(a)*w*.24,21,Math.sin(a)*w*.24]);}
+      cylinder(g,Math.max(14,w*.38),8,steel,[0,10,0],'y');
+      const carousel=new THREE.Group(); g.add(carousel); g.userData.carousel=carousel;
+      cylinder(carousel,Math.max(10,w*.29),5,blue,[0,16,0],'y');
+      g.userData.stationFixtures=[]; g.userData.stationParts=[]; g.userData.stationCount=0;
     } else if(type==='sensor') {
       // Inductive proximity sensor: threaded metallic barrel and sensing face.
       cylinder(g,Math.max(4,Math.min(w,h)*.27),Math.max(12,w*.7),alu,[0,12,0],'x');
@@ -200,7 +202,29 @@ export async function createMachine3DView(container, statusEl) {
       if(g.userData.sensorLight){const detected=!!obj.detected;g.userData.sensorLight.material=detected?green:steel;g.userData.sensorLight.scale.setScalar(detected?1.18:1);const bm=g.userData.sensorBeam;if(bm){const dist=Math.max(.01,Number(obj.detection_distance)||0),x0=w*.5+.5;bm.scale.y=dist;bm.position.x=x0+dist/2;}}
       if(g.userData.actuator){const pressed=!!(obj.pressed ?? obj.on);g.userData.actuator.position.y=Math.max(8,h*.35)-(pressed?3:0);if(obj.type==='toggle_switch')g.userData.actuator.rotation.z=pressed?-.45:.45;}
       if(g.userData.lamps){const lampKeys=['red','blue','green','yellow'];g.userData.lamps.forEach((lamp,i)=>{const on=!!obj[lampKeys[i]];lamp.material=on?[red,blue,green,yellow][i]:dimLampMats[i];});}
-      if(g.userData.tableTop && obj.moving)g.userData.tableTop.rotation.y=animationTime*.0015;
+      if(g.userData.carousel){
+        const stationCount=Math.max(2,Math.min(24,Math.floor(Number(obj.stations)||6)));
+        if(g.userData.stationCount!==stationCount){
+          for(const fixture of g.userData.stationFixtures)g.userData.carousel.remove(fixture);
+          for(const part of g.userData.stationParts)g.userData.carousel.remove(part);
+          g.userData.stationFixtures=[];g.userData.stationParts=[];g.userData.stationCount=stationCount;
+          const radius=w*.24, pocketRadius=Math.max(5,Math.min(10,w*.055));
+          for(let i=0;i<stationCount;i++){
+            const a=(i/stationCount)*Math.PI*2-Math.PI/2, x=Math.cos(a)*radius, z=Math.sin(a)*radius;
+            const fixture=new THREE.Mesh(new THREE.TorusGeometry(pocketRadius,pocketRadius*.18,8,24),steel);
+            fixture.rotation.x=Math.PI/2;fixture.position.set(x,19.2,z);fixture.castShadow=true;g.userData.carousel.add(fixture);
+            const seat=cylinder(g.userData.carousel,pocketRadius*.72,1.2,dark,[x,19.1,z],'y');
+            g.userData.stationFixtures.push(fixture,seat);
+            const part=box(g.userData.carousel,[pocketRadius*1.3,Math.max(6,pocketRadius),pocketRadius*1.3],productMat,[x,24,z]);
+            part.visible=false;g.userData.stationParts.push(part);
+          }
+        }
+        const stationParts=Array.isArray(obj.station_parts)?obj.station_parts:[];
+        g.userData.stationParts.forEach((part,i)=>{part.visible=!!stationParts[i];});
+        // Three.js maps positive Y rotation opposite to the clockwise 2D
+        // screen rotation (whose Y axis points downward).
+        g.userData.carousel.rotation.y=-(Number(obj.angle)||0)*Math.PI/180;
+      }
       if(g.userData.faultLamp)g.userData.faultLamp.visible=!!(obj.fault||obj.emergency_stop);
       // Selection is used by toolbar actions, but must not alter the rendered
       // component. In particular, simulation and online clicks only open the
@@ -221,7 +245,9 @@ export async function createMachine3DView(container, statusEl) {
     if(tag && transformHandlers?.canStart?.(tag,e)) {
       const g=meshes.get(tag), p=groundPoint(e.clientX,e.clientY);
       if(g&&p){
-        transformTag=tag;transformOffset={x:g.position.x-p.x,z:g.position.z-p.z};transformMoved=false;dragging=false;
+        transformTag=tag;transformOffset={x:g.position.x-p.x,z:g.position.z-p.z};
+        const obj=currentState[tag]||{};transformStartPosition={x:Number(obj.x)||0,y:Number(obj.y)||0};
+        transformMoved=false;dragging=false;
         renderer.domElement.style.cursor='grabbing';
         try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
         e.preventDefault();e.stopImmediatePropagation();return;
@@ -234,7 +260,9 @@ export async function createMachine3DView(container, statusEl) {
     if(transformTag){if(!(e.buttons&1)){finishTransform();return;}const p=groundPoint(e.clientX,e.clientY),g=meshes.get(transformTag);if(!p||!g)return;
       const x=Math.round((p.x+transformOffset.x-g.userData.dimensions.w/2)/10)*10;
       const y=Math.round((p.z+transformOffset.z-g.userData.dimensions.h/2)/10)*10;
-      g.position.x=x+g.userData.dimensions.w/2;g.position.z=y+g.userData.dimensions.h/2;transformMoved=true;transformHandlers?.move?.(transformTag,x,y);return;
+      g.position.x=x+g.userData.dimensions.w/2;g.position.z=y+g.userData.dimensions.h/2;
+      transformMoved=!!transformStartPosition&&(x!==transformStartPosition.x||y!==transformStartPosition.y);
+      transformHandlers?.move?.(transformTag,x,y);return;
     }
     if(!dragging)return;if(!(e.buttons&1)){dragging=false;return;}theta-=(e.clientX-lastX)*.008;phi+=(e.clientY-lastY)*.008;lastX=e.clientX;lastY=e.clientY;placeCamera();});
   window.addEventListener('pointerup',()=>{if(transformTag){finishTransform();return;}dragging=false;});
@@ -265,7 +293,7 @@ export async function createMachine3DView(container, statusEl) {
   }
   function finishTransform(){
     if(!transformTag)return;const tag=transformTag,g=meshes.get(tag);if(g&&transformMoved)transformHandlers?.end?.(tag,Math.round((g.position.x-g.userData.dimensions.w/2)/10)*10,Math.round((g.position.z-g.userData.dimensions.h/2)/10)*10);
-    transformTag=null;transformOffset=null;transformMoved=false;renderer.domElement.style.cursor='';
+    transformTag=null;transformOffset=null;transformStartPosition=null;transformMoved=false;renderer.domElement.style.cursor='';
   }
 
   let onPick=null, onInteract=null, interactionTag=null, downX=0, downY=0;

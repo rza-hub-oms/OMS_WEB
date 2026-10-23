@@ -17,7 +17,6 @@ from core.components.motor import MotorBehavior
 from core.components.inductive_sensor import InductiveSensorBehavior, SensorBehavior
 from core.components.photoelectric_sensor import PhotoelectricSensorBehavior
 from core.components.push_button import PushButtonBehavior
-from core.components.push_button import PushButtonBehavior
 from core.components.emergency_push_button import EmergencyPushButtonBehavior
 from core.components.toggle_switch import ToggleSwitchBehavior
 from core.components.tower_light import TowerLightBehavior
@@ -103,14 +102,9 @@ def _press_push_button(cylinder: "CylinderBehavior", target: PushButtonBehavior)
     target.set_pressed(_tip_overlaps_target(cylinder, target))
 
 
-# Maps a target component's class to the function that defines what a
-# fully-extended cylinder does to it. To give the cylinder a new kind
-# of physical relation (e.g. pressing a sensor or a push button), write
-# a handler with the same signature -- handler(cylinder, target) -- and
-# add it here. Nothing else (the UI dropdown, the tick loop, the
-# component-select field) needs to change: the dropdown already offers
-# every component type, and the tick loop already looks the target's
-# class up in this dict.
+# Maps simple cylinder target relations to their physical behavior. The
+# index-table transfer is handled in Scene because it also needs to find
+# and remove a box from the table's configured infeed conveyor.
 CYLINDER_RELATION_HANDLERS = {
     ConveyorBehavior: _push_box_off_conveyor,
     SensorBehavior: _press_sensor,
@@ -167,6 +161,13 @@ class Scene:
         for other in self.objects.values():
             if getattr(other, "parent_tag", None) == tag_name:
                 other.parent_tag = None
+            if isinstance(other, CylinderBehavior) and other.target_tag == tag_name:
+                other.set_target_tag(None)
+            if isinstance(other, IndexTableBehavior) and other.feed_conveyor_tag == tag_name:
+                other.set_feed_conveyor_tag(None)
+            if isinstance(other, IndexTableBehavior) and other.outfeed_conveyor_tag == tag_name:
+                other.set_outfeed_conveyor_tag(None)
+        self._cylinder_previously_extended.pop(tag_name, None)
         self.connections = [
             c for c in self.connections
             if c.get("source") != tag_name and c.get("target") != tag_name
@@ -203,6 +204,10 @@ class Scene:
                 other.parent_tag = new_name
             if isinstance(other, CylinderBehavior) and other.target_tag == tag_name:
                 other.target_tag = new_name
+            if isinstance(other, IndexTableBehavior) and other.feed_conveyor_tag == tag_name:
+                other.set_feed_conveyor_tag(new_name)
+            if isinstance(other, IndexTableBehavior) and other.outfeed_conveyor_tag == tag_name:
+                other.set_outfeed_conveyor_tag(new_name)
 
         for connection in self.connections:
             if connection.get("source") == tag_name:
@@ -212,7 +217,7 @@ class Scene:
 
         return True
 
-    def create_component(self, component_type: str, x: float, y: float):
+    def create_component(self, component_type: str, x: float, y: float, z: float = 0.0):
         """Create a new component instance of the given type at (x, y),
         with an auto-generated unique tag name (e.g. "Conveyor_2"),
         mirroring the original Qt app's add_conveyor()-style naming.
@@ -226,6 +231,7 @@ class Scene:
         tag_name = f"{prefixes.get(component_type, component_type.capitalize())}_{self._type_counters[component_type]}"
 
         obj = behavior_cls(tag_name, x=x, y=y)
+        obj.set_z(z)
         self.add(obj)
         self.tags.sync()
         return obj
@@ -320,13 +326,108 @@ class Scene:
         self.tags.evaluate_expressions()
         self.alarm_engine.evaluate()
 
+    def _transfer_conveyor_part_to_table(self, cylinder, table) -> bool:
+        """Transfer a conveyor box when a cylinder tip pushes it into a table."""
+        if table.get_moving():
+            return False
+        feeder = self.objects.get(table.feed_conveyor_tag)
+        if not isinstance(feeder, ConveyorBehavior):
+            return False
+
+        tip = cylinder.get_rod_tip_position()
+        box_polys = self._conveyor_box_polys(feeder)
+        box_height = float(getattr(feeder, "box_height", 24.0))
+        rod_height = float(getattr(cylinder, "z", 0.0)) + max(12.0, float(cylinder.height) * 0.25)
+        box_center_height = float(getattr(feeder, "z", 0.0)) + 22.0
+        table_surface = float(getattr(table, "z", 0.0)) + 21.0
+        vertical_tolerance = max(10.0, box_height / 2.0 + float(cylinder.height) * 0.1)
+        if abs(rod_height - box_center_height) > vertical_tolerance:
+            return False
+        if abs(box_center_height - table_surface) > max(10.0, box_height):
+            return False
+
+        table_cx = table.x + table.width / 2.0
+        table_cy = table.y + table.height / 2.0
+        max_table_radius = max(table.width, table.height) * 0.52
+        contact_radius = max(4.0, min(12.0, feeder.box_width * 0.15))
+        for i, poly in enumerate(box_polys):
+            if not self._point_near_polygon(tip, poly, contact_radius):
+                continue
+            center_x = sum(point[0] for point in poly) / len(poly)
+            center_y = sum(point[1] for point in poly) / len(poly)
+            if math.hypot(center_x - table_cx, center_y - table_cy) > max_table_radius:
+                continue
+            if table.get_part_present_at(center_x, center_y):
+                return False
+            if not table.accept_part(center_x, center_y):
+                return False
+            del feeder.box_positions[i]
+            return True
+        return False
+
+    def _cylinder_touches_conveyor_box(self, cylinder, conveyor) -> bool:
+        """Whether the extended rod tip is contacting a box on this belt."""
+        if not isinstance(conveyor, ConveyorBehavior):
+            return False
+        tip = cylinder.get_rod_tip_position()
+        contact_radius = max(4.0, min(12.0, conveyor.box_width * 0.15))
+        return any(self._point_near_polygon(tip, poly, contact_radius)
+                   for poly in self._conveyor_box_polys(conveyor))
+
+    def _transfer_table_part_to_conveyor(self, cylinder, table) -> bool:
+        """Push the occupied table pocket facing the cylinder onto its outfeed."""
+        if table.get_moving():
+            return False
+        outfeed = self.objects.get(table.outfeed_conveyor_tag)
+        if not isinstance(outfeed, ConveyorBehavior):
+            return False
+
+        tip_x, tip_y = cylinder.get_rod_tip_position()
+        table_cx = table.x + table.width / 2.0
+        table_cy = table.y + table.height / 2.0
+        if math.hypot(tip_x - table_cx, tip_y - table_cy) > max(table.width, table.height) * 0.8:
+            return False
+
+        box_w = float(outfeed.box_width)
+        travel = max(0.0, float(outfeed.width) - box_w)
+        if travel < 0:
+            return False
+
+        # Drop the box where it was pushed: project the rod tip into the
+        # conveyor's own (rotated) frame and centre the box on that point.
+        ang = math.radians(getattr(outfeed, "rotation", 0.0) or 0.0)
+        cx = outfeed.x + outfeed.width / 2.0
+        cy = outfeed.y + outfeed.height / 2.0
+        dx, dy = tip_x - cx, tip_y - cy
+        local_x = cx + dx * math.cos(ang) + dy * math.sin(ang)
+        desired = max(0.0, min(travel, local_x - outfeed.x - box_w / 2.0))
+
+        existing = [float(p) for p in outfeed.box_positions]
+        step = max(box_w, 1.0)
+        candidates = [desired] + sorted(
+            (min(travel, i * step) for i in range(int(travel // step) + 1)),
+            key=lambda p: abs(p - desired))
+        slot = next((p for p in candidates
+                     if all(abs(p - occupied) >= box_w - 1e-6 for occupied in existing)), None)
+        if slot is None:
+            return False
+
+        box_center_height = float(getattr(outfeed, "z", 0.0)) + 22.0
+        table_surface = float(getattr(table, "z", 0.0)) + 21.0
+        rod_height = float(getattr(cylinder, "z", 0.0)) + max(12.0, float(cylinder.height) * 0.25)
+        vertical_tolerance = max(10.0, float(outfeed.box_height) / 2.0 + float(cylinder.height) * 0.1)
+        if abs(rod_height - box_center_height) > vertical_tolerance:
+            return False
+        if abs(box_center_height - table_surface) > max(10.0, float(outfeed.box_height)):
+            return False
+
+        if not table.remove_part_at(tip_x, tip_y):
+            return False
+        outfeed.box_positions.append(slot)
+        return True
+
     def _handle_cylinder_relations(self) -> None:
-        """Runs each fully-extended cylinder's physical relation (see
-        CYLINDER_RELATION_HANDLERS) against its target component, if
-        any. Which handler runs depends only on the target's type, so
-        a cylinder can be pointed at any component; if no handler is
-        registered for that type yet, nothing happens.
-        """
+        """Run configured cylinder relations and table-feed transfers."""
         for obj in self.objects.values():
             if not isinstance(obj, CylinderBehavior):
                 continue
@@ -342,6 +443,18 @@ class Scene:
 
             target = self.objects.get(obj.target_tag)
             if target is None:
+                continue
+
+            if isinstance(target, IndexTableBehavior):
+                fully_extended = extending and obj.progress >= 1.0
+                was_fully_extended = self._cylinder_previously_extended.get(obj.tag_name, False)
+                if fully_extended and not was_fully_extended:
+                    feeder = self.objects.get(target.feed_conveyor_tag)
+                    touching_infeed_box = self._cylinder_touches_conveyor_box(obj, feeder)
+                    transferred = self._transfer_conveyor_part_to_table(obj, target)
+                    if not transferred and not touching_infeed_box:
+                        self._transfer_table_part_to_conveyor(obj, target)
+                self._cylinder_previously_extended[obj.tag_name] = fully_extended
                 continue
 
             # Physical momentary targets must be released as soon as the

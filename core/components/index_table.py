@@ -1,3 +1,5 @@
+import math
+
 from core.sim_object import SimObject
 from core.io import Signal
 
@@ -28,6 +30,9 @@ class IndexTableBehavior(SimObject):
         super().__init__(name, x, y, size, size)
 
         self.stations = 6
+        self.station_parts = [False] * self.stations
+        self.feed_conveyor_tag = None
+        self.outfeed_conveyor_tag = None
         self.dwell_ms = 1000.0
         self.move_ms = 500.0
         self.running = False
@@ -54,9 +59,97 @@ class IndexTableBehavior(SimObject):
         n = int(float(value))
         self.stations = max(self.MIN_STATIONS, min(self.MAX_STATIONS, n))
         self._step %= self.stations
+        self.station_parts = (self.station_parts + [False] * self.stations)[:self.stations]
+
+    def set_station_parts(self, value):
+        if not isinstance(value, (list, tuple)):
+            return
+        self.station_parts = [bool(item) for item in value[:self.stations]]
+        self.station_parts.extend([False] * (self.stations - len(self.station_parts)))
+
+    def _current_pocket_index(self):
+        # Pocket currently aligned with the fixed load/unload position.
+        return (-self._step) % self.stations
+
+    def get_part_present(self):
+        return bool(self.station_parts[self._current_pocket_index()])
+
+    def _pocket_index_at(self, world_x, world_y):
+        cx = self.x + self.width / 2.0
+        cy = self.y + self.height / 2.0
+        world_angle = math.atan2(float(world_y) - cy, float(world_x) - cx)
+        # The 2D station layout starts at -90 degrees and turns clockwise.
+        # Convert the world angle back through the current table rotation.
+        local_angle = (world_angle - math.radians(self.angle) + math.pi / 2.0) % (2.0 * math.pi)
+        return int(round(local_angle / (2.0 * math.pi / self.stations))) % self.stations
+
+    def get_part_present_at(self, world_x, world_y):
+        return bool(self.station_parts[self._pocket_index_at(world_x, world_y)])
+
+    def remove_part_at(self, world_x, world_y):
+        """Remove a part from the pocket facing a physical outfeed point."""
+        if self._moving:
+            return False
+        pocket = self._pocket_index_at(world_x, world_y)
+        if not self.station_parts[pocket]:
+            return False
+        self.station_parts[pocket] = False
+        return True
+
+    @staticmethod
+    def _as_bool(value):
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "1", "on", "yes"}
+        return bool(value)
+
+    def set_load_part(self, value):
+        value = self._as_bool(value)
+        if value and not getattr(self, "_load_part_cmd", False) and not self._moving:
+            pocket = self._current_pocket_index()
+            self.station_parts[pocket] = True
+        self._load_part_cmd = value
+
+    def get_load_part(self):
+        return bool(getattr(self, "_load_part_cmd", False))
+
+    def set_unload_part(self, value):
+        value = self._as_bool(value)
+        if value and not getattr(self, "_unload_part_cmd", False) and not self._moving:
+            pocket = self._current_pocket_index()
+            self.station_parts[pocket] = False
+        self._unload_part_cmd = value
+
+    def get_unload_part(self):
+        return bool(getattr(self, "_unload_part_cmd", False))
 
     def get_stations(self):
         return self.stations
+
+    def set_feed_conveyor_tag(self, value):
+        value = str(value or "").strip()
+        self.feed_conveyor_tag = value or None
+
+    def set_outfeed_conveyor_tag(self, value):
+        value = str(value or "").strip()
+        self.outfeed_conveyor_tag = value or None
+
+    def accept_part(self, world_x=None, world_y=None):
+        """Place a transferred part in the pocket facing its physical feed point.
+
+        The station array stores pockets in the table's local frame. Convert
+        the feed point's world angle into that frame so a cylinder feeding
+        from any side marks the pocket that is actually facing it.
+        """
+        if self._moving:
+            return False
+        if world_x is None or world_y is None:
+            pocket = self._current_pocket_index()
+        else:
+            pocket = self._pocket_index_at(world_x, world_y)
+        if self.station_parts[pocket]:
+            return False
+        self.station_parts[pocket] = True
+        return True
 
     def set_dwell_ms(self, value):
         self.dwell_ms = max(0.0, float(value))
@@ -149,6 +242,9 @@ class IndexTableBehavior(SimObject):
             Signal("moving", self.get_moving, None, bool, "Table is rotating"),
             Signal("in_position", self.get_in_position, None, bool, "Table stopped at a station"),
             Signal("cycle_count", self.get_cycle_count, None, int, "Completed revolutions"),
+            Signal("load_part", self.get_load_part, self.set_load_part, bool, "Load a part into the pocket at the transfer position"),
+            Signal("unload_part", self.get_unload_part, self.set_unload_part, bool, "Unload a part from the pocket at the transfer position"),
+            Signal("part_present", self.get_part_present, None, bool, "Part detected at the transfer position"),
         ]
 
     def get_plc_io_points(self):
@@ -160,6 +256,9 @@ class IndexTableBehavior(SimObject):
             "moving": (self.get_moving, None),
             "in_position": (self.get_in_position, None),
             "cycle_count": (self.get_cycle_count, None),
+            "load_part": (self.get_load_part, self.set_load_part),
+            "unload_part": (self.get_unload_part, self.set_unload_part),
+            "part_present": (self.get_part_present, None),
             "mode": (self.get_mode, self.set_mode),
             "fault": (self.get_fault, self.set_fault),
             "emergency_stop": (self.get_emergency_stop, self.set_emergency_stop),
@@ -177,6 +276,10 @@ class IndexTableBehavior(SimObject):
             "layer": self.layer,
             "mode": self.mode, "fault": self.fault, "emergency_stop": self.emergency_stop,
             "stations": self.stations,
+            "station_parts": list(self.station_parts),
+            "feed_conveyor_tag": self.feed_conveyor_tag,
+            "outfeed_conveyor_tag": self.outfeed_conveyor_tag,
+            "part_present": self.get_part_present(),
             "dwell_ms": self.dwell_ms,
             "move_ms": self.move_ms,
             "running": self.running,
